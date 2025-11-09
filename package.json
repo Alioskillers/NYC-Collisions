@@ -1,0 +1,28 @@
+{
+  "name": "collisions-monorepo",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w server",
+    "build": "npm run build -w frontend",
+    "start": "NODE_ENV=production node server/index.js"
+  },
+  "version": "1.0.0",
+  "description": "Data engineering + visualization project (GIU, W25).",
+  "main": "index.js",
+  "dependencies": {
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
+    "dotenv": "^17.2.3",
+    "duckdb": "^1.4.1",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
