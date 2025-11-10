@@ -8,10 +8,13 @@ import {
   CardContent,
   Button,
   Box,
+  Skeleton,
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 
-function KPI({ label, value }) {
+const nf = new Intl.NumberFormat();
+
+function KPI({ label, value, loading }) {
   const isNum = Number.isFinite(value);
   return (
     <Card
@@ -28,9 +31,18 @@ function KPI({ label, value }) {
         <Typography variant="subtitle2" color="text.secondary">
           {label}
         </Typography>
-        <Typography variant="h5" sx={{ fontWeight: 800, mt: 0.5 }}>
-          {isNum ? value.toLocaleString() : "—"}
-        </Typography>
+        {loading ? (
+          <Skeleton
+            variant="text"
+            width={90}
+            height={36}
+            sx={{ mx: "auto", my: 0.5 }}
+          />
+        ) : (
+          <Typography variant="h5" sx={{ fontWeight: 800, mt: 0.5 }}>
+            {isNum ? nf.format(value) : "—"}
+          </Typography>
+        )}
       </CardContent>
     </Card>
   );
@@ -43,31 +55,60 @@ const toNum = (v, fallback = 0) => {
 };
 
 export default function Home() {
-  const [kpis, setKpis] = useState({ collisions: 0, injuries: 0, fatalities: 0 });
+  const [kpis, setKpis] = useState({
+    collisions: 0,
+    injuries: 0,
+    fatalities: 0,
+  });
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
     const controller = new AbortController();
 
-    fetch("/api/summary", { signal: controller.signal })
-      .then((r) => r.json())
-      .then((d) => {
-        const k = d?.kpis || d || {};
+    (async () => {
+      try {
+        const r = await fetch("/api/summary", { signal: controller.signal });
+        const d = await r.json();
 
-        // robust mapping + numeric coercion
+        // Preferred shape from backend:
+        // { total_collisions, total_injuries, total_fatalities }
+        // Fallbacks to be robust with older responses.
         const collisions = toNum(
-          k.collisions ?? k.total_crashes ?? k.crashes ?? k.rows ?? k.total ?? 0
+          d.total_collisions ??
+            d.collisions ??
+            d.total_crashes ??
+            d.crashes ??
+            d.rows ??
+            d.total ??
+            d?.kpis?.collisions ??
+            0
         );
         const injuries = toNum(
-          k.injuries ?? k.injured_sum ?? k.injured ?? k.total_injured ?? 0
+          d.total_injuries ??
+            d.injuries ??
+            d.injured_sum ??
+            d.total_injured ??
+            d?.kpis?.injuries ??
+            0
         );
         const fatalities = toNum(
-          k.fatalities ?? k.killed_sum ?? k.killed ?? k.total_killed ?? 0
+          d.total_fatalities ??
+            d.fatalities ??
+            d.killed_sum ??
+            d.total_killed ??
+            d?.kpis?.fatalities ??
+            0
         );
 
         setKpis({ collisions, injuries, fatalities });
-      })
-      .catch(() => setKpis({ collisions: 0, injuries: 0, fatalities: 0 }));
+      } catch (e) {
+        // non-fatal: keep zeros
+        console.warn("summary fetch failed:", e);
+      } finally {
+        setLoading(false);
+      }
+    })();
 
     return () => controller.abort();
   }, []);
@@ -124,7 +165,8 @@ export default function Home() {
             the NYPD, this dashboard transforms raw crash records into insight — helping us
             understand when accidents occur, where risks increase, and which factors contribute
             most to injuries and fatalities.
-            <br /><br />
+            <br />
+            <br />
             Explore key indicators, visualize patterns, and reveal trends across the boroughs
             and neighborhoods that make up the world’s busiest city.
           </Typography>
@@ -132,17 +174,29 @@ export default function Home() {
           {/* KPIs Centered */}
           <Grid container spacing={2} justifyContent="center" sx={{ mb: 4 }}>
             <Grid item xs={10} sm={6} md={3}>
-              <KPI label="Total Collisions" value={kpis.collisions} />
+              <KPI
+                label="Total Collisions"
+                value={kpis.collisions}
+                loading={loading}
+              />
             </Grid>
             <Grid item xs={10} sm={6} md={3}>
-              <KPI label="Injuries" value={kpis.injuries} />
+              <KPI label="Injuries" value={kpis.injuries} loading={loading} />
             </Grid>
             <Grid item xs={10} sm={6} md={3}>
-              <KPI label="Fatalities" value={kpis.fatalities} />
+              <KPI
+                label="Fatalities"
+                value={kpis.fatalities}
+                loading={loading}
+              />
             </Grid>
           </Grid>
 
-          <Button variant="contained" size="large" onClick={() => navigate("/analytics")}>
+          <Button
+            variant="contained"
+            size="large"
+            onClick={() => navigate("/analytics")}
+          >
             View Analytics
           </Button>
         </Container>

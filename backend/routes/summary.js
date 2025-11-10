@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const cache = require('../middleware/cache');
-const { summary } = require('../controllers/summaryController');
+const { getSummary } = require('../controllers/summaryController');
 
 const withCache = (ttlMs = 60_000) => (req, res, next) => {
   const hit = cache.get(req);
@@ -11,6 +11,6 @@ const withCache = (ttlMs = 60_000) => (req, res, next) => {
   next();
 };
 
-router.get('/', withCache(30_000), summary);
+router.get('/', withCache(30_000), getSummary);
 
 module.exports = router;
