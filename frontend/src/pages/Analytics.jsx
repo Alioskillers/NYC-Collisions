@@ -18,6 +18,13 @@ import PlotCard from "../components/PlotCard.jsx";
 import { fetchJSON } from "../lib/api";
 
 function ensureFigure(name, payload, fallbackBuilder, height = 420) {
+  const baseLayout = {
+    margin: { t: 50, r: 20, b: 60, l: 60 },
+    autosize: true,
+    bargap: 0.20,
+    bargroupgap: 0.05,
+  };
+
   // Helper: check if an array likely contains Plotly traces
   const looksLikeTraceArray = (arr) => {
     if (!Array.isArray(arr) || arr.length === 0) return false;
@@ -41,8 +48,7 @@ function ensureFigure(name, payload, fallbackBuilder, height = 420) {
     return {
       data: payload.data,
       layout: {
-        margin: { t: 50, r: 20, b: 60, l: 60 },
-        autosize: true,
+        ...baseLayout,
         ...(payload.layout || {}),
         height: (payload.layout && payload.layout.height) || height,
       },
@@ -56,8 +62,7 @@ function ensureFigure(name, payload, fallbackBuilder, height = 420) {
   return {
     data: built.data || [],
     layout: {
-      margin: { t: 50, r: 20, b: 60, l: 60 },
-      autosize: true,
+      ...baseLayout,
       height,
       ...(built.layout || {}),
     },
@@ -158,6 +163,7 @@ export default function Analytics() {
   const [figs, setFigs] = useState({
     scatter: null,
     box: null,
+    hist: null,
     bar: null,
     line: null,
     corr: null,
@@ -220,6 +226,7 @@ export default function Analytics() {
       const calls = await Promise.allSettled([
         withOpts("/api/eda/scatter?x=latitude&y=hour&limit=3000"),
         withOpts("/api/eda/box?col=hour&by=bodily_injury"),
+        withOpts("/api/eda/hist?col=hour&bins=24&from=persons"),
         withOpts("/api/eda/bar?cat=bodily_injury&top=12"),
         withOpts("/api/eda/line?date_col=crash_date&freq=M"),
         withOpts("/api/eda/corr?cols=latitude,hour"),
@@ -272,13 +279,38 @@ export default function Analytics() {
         450
       );
 
+      const histFig = ensureFigure(
+        "hist",
+        val(2),
+        (p) =>
+          p && Array.isArray(p.values)
+            ? {
+                data: [{
+                  type: "histogram",
+                  x: p.values,
+                  nbinsx: p.bins ?? 24,
+                  marker: { line: { color: "rgba(0,0,0,0.25)", width: 1 } },
+                  opacity: 0.9,
+                }],
+                layout: { xaxis: { title: "hour" }, yaxis: { title: "count" } },
+              }
+            : null,
+        420
+      );
+
       const barFig = ensureFigure(
         "bar",
-        val(2),
+        val(3),
         (p) =>
           p && p.x && p.y
             ? {
-                data: [{ type: "bar", x: p.x, y: p.y }],
+                data: [{
+                  type: "bar",
+                  x: p.x,
+                  y: p.y,
+                  marker: { line: { color: "rgba(0,0,0,0.25)", width: 1 } },
+                  opacity: 0.95,
+                }],
                 layout: { xaxis: { title: "bodily_injury" }, yaxis: { title: "count" } },
               }
             : null,
@@ -287,7 +319,7 @@ export default function Analytics() {
 
       const lineFig = ensureFigure(
         "line",
-        val(3),
+        val(4),
         (p) =>
           p && p.x && p.y
             ? {
@@ -300,7 +332,7 @@ export default function Analytics() {
 
       const corrFig = ensureFigure(
         "corr",
-        val(4),
+        val(5),
         (p) =>
           p && p.z && p.x && p.y
             ? {
@@ -324,7 +356,7 @@ export default function Analytics() {
 
       const pieFig = ensureFigure(
         "pie",
-        val(5),
+        val(6),
         (p) =>
           p && p.labels && p.values
             ? { data: [{ type: "pie", labels: p.labels, values: p.values, hole: 0.35 }] }
@@ -335,6 +367,7 @@ export default function Analytics() {
       setFigs({
         scatter: scatterFig,
         box: boxFig,
+        hist: histFig,
         bar: barFig,
         line: lineFig,
         corr: corrFig,
@@ -432,6 +465,15 @@ export default function Analytics() {
           subtitle="Y: hour grouped by bodily_injury"
           data={figs.box.data}
           layout={figs.box.layout}
+        />
+      )}
+
+      {figs.hist && (
+        <PlotCard
+          title="Histogram: hour distribution"
+          subtitle="Distribution of hour (persons)"
+          data={figs.hist.data}
+          layout={figs.hist.layout}
         />
       )}
 

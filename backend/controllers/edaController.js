@@ -187,37 +187,22 @@ async function boxSummary(req, res) {
 /** ---- HISTOGRAM ----
  * /api/eda/hist?col=hour&bins=24&from=persons|crashes
  * returns:
- *   { x:[binLabel], y:[count], edges:[...], counts:[...] }
+ *   { values, bins }
  */
-async function histCounts(req, res) {
+async function histogram(req, res) {
   const { crashes, persons } = getData();
   const col   = req.query.col || 'hour';
   const bins  = Math.max(1, parseInt(req.query.bins || '24', 10));
   const from  = (req.query.from || 'persons').toLowerCase();
 
   const src = from === 'crashes' ? crashes : persons;
-  const vals = [];
+  const values = [];
   for (const r of src) {
     const v = Number(r[col]);
-    if (Number.isFinite(v)) vals.push(v);
+    if (Number.isFinite(v)) values.push(v);
   }
-  if (vals.length === 0) return res.json({ x: [], y: [], edges: [], counts: [] });
 
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const step = (max - min) / bins || 1;
-
-  const edges = Array.from({ length: bins + 1 }, (_, i) => min + i * step);
-  const counts = new Array(bins).fill(0);
-  for (const v of vals) {
-    let idx = Math.floor((v - min) / step);
-    if (idx >= bins) idx = bins - 1;
-    if (idx < 0) idx = 0;
-    counts[idx]++;
-  }
-  const labels = counts.map((_, i) => `${edges[i].toFixed(1)}–${edges[i+1].toFixed(1)}`);
-
-  res.json({ x: labels, y: counts, edges, counts });
+  res.json({ values, bins });
 }
 
 /** ---- CORRELATION (heatmap) ----
@@ -268,6 +253,6 @@ module.exports = {
   pieCounts,
   scatterXY,
   boxSummary,
-  histCounts,
+  histogram,
   corrMatrix,
 };

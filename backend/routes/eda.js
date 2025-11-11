@@ -10,7 +10,7 @@ const {
   scatterXY,
   boxSummary,
   corrMatrix,
-  histCounts,
+  histogram,
 } = require('../controllers/edaController');
 
 // simple ttl cache per query
@@ -28,6 +28,6 @@ router.get('/pie',     withCache(), pieCounts);
 router.get('/scatter', withCache(), scatterXY);
 router.get('/box',     withCache(), boxSummary);
 router.get('/corr',    withCache(), corrMatrix);
-router.get('/hist',    withCache(), histCounts);
+router.get('/hist',    withCache(), histogram);
 
 module.exports = router;
