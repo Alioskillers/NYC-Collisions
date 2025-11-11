@@ -1,18 +1,23 @@
 # --- Core backend ---
-flask==3.0.3
-gunicorn==23.0.0
-flask-compress==1.14
-orjson==3.10.7
+flask
+gunicorn
+flask-compress
+orjson
 
 # --- Data / Analytics ---
-pandas==2.2.2
-numpy==1.26.4
-scipy==1.13.1
+pandas
+numpy
+scipy
 
 # --- Plot / JSON helpers (if needed server-side) ---
-plotly==5.24.1
+plotly
 
 # --- Optional but recommended for production ---
-werkzeug==3.0.3
+werkzeug
 
 asgiref
+
+requests
+tqdm
+
+orjson
