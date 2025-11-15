@@ -83,3 +83,18 @@ let dataLoadedPromise = (async () => {
 
 // Export the app for serverless (Vercel)
 module.exports = app;
+
+// ---------- Local dev: only listen if run directly ----------
+if (require.main === module) {
+  (async () => {
+    try {
+      await dataLoadedPromise;
+      app.listen(PORT, () => {
+        console.log(`Server listening on http://localhost:${PORT}`);
+      });
+    } catch (e) {
+      console.error('Startup failed:', e);
+      process.exit(1);
+    }
+  })();
+}
