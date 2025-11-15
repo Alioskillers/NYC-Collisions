@@ -4,8 +4,6 @@ __pycache__/
 .env
 .env.example
 /api
-/old
-vercel.json
 node_modules/
 dist/
 .DS_Store
