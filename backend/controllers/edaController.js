@@ -12,6 +12,96 @@ const {
 const notNull = (v) => v !== null && v !== undefined && v !== '';
 const toNumber = (v) => (Number.isFinite(v) ? v : null);
 
+const parseFilters = (raw) => {
+  if (!raw) return [];
+  try {
+    if (Array.isArray(raw)) {
+      // In case Express gives multiple params, merge them
+      const merged = [];
+      for (const r of raw) {
+        if (typeof r === 'string') merged.push(...JSON.parse(r));
+        else if (Array.isArray(r)) merged.push(...r);
+      }
+      return merged;
+    }
+    if (typeof raw === 'string') {
+      return JSON.parse(raw);
+    }
+    if (typeof raw === 'object') return raw;
+  } catch (err) {
+    console.warn('[filters] Failed to parse filters param:', err);
+  }
+  return [];
+};
+
+const getFieldValues = (record, col) => {
+  if (!record) return [];
+  // Virtual columns used by the UI
+  if (col === 'vehicle_type') {
+    return [
+      record.vehicle_type_code1,
+      record.vehicle_type_code2,
+      record.vehicle_type_code_3,
+      record.vehicle_type_code_4,
+      record.vehicle_type_code_5,
+    ].filter(notNull);
+  }
+
+  if (col === 'factor') {
+    const values = [];
+    if (notNull(record.contributing_factor_vehicle_1)) {
+      values.push(record.contributing_factor_vehicle_1);
+    }
+    if (notNull(record.contributing_factor_vehicle_2)) {
+      values.push(record.contributing_factor_vehicle_2);
+    }
+    return values;
+  }
+
+  // Default: direct column access
+  return [record[col]];
+};
+
+const recordMatchesFilters = (record, filters) => {
+  if (!filters || filters.length === 0) return true;
+
+  for (const f of filters) {
+    if (!f || !f.col) continue;
+    const col = f.col;
+    const op = (f.op || 'eq').toLowerCase();
+    const val = f.val;
+
+    const values = getFieldValues(record, col).filter(notNull);
+    if (values.length === 0) return false;
+
+    if (op === 'in') {
+      const allowed = Array.isArray(val) ? val : [val];
+      const set = new Set(allowed.map((v) => String(v)));
+      const ok = values.some((v) => set.has(String(v)));
+      if (!ok) return false;
+    } else if (op === 'contains') {
+      const pattern = String(val ?? '');
+      if (!pattern) continue;
+      let re;
+      try {
+        re = new RegExp(pattern, 'i');
+      } catch (e) {
+        // Fallback: escape regex
+        const escaped = pattern.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+        re = new RegExp(escaped, 'i');
+      }
+      const ok = values.some((v) => re.test(String(v)));
+      if (!ok) return false;
+    } else if (op === 'eq') {
+      const target = String(val);
+      const ok = values.some((v) => String(v) === target);
+      if (!ok) return false;
+    }
+  }
+
+  return true;
+};
+
 /** ---- LINE (time series) ----
  * /api/eda/line?date_col=crash_date&freq=M|Y
  * returns:
@@ -22,10 +112,13 @@ async function lineByTime(req, res) {
   const dateCol = req.query.date_col || 'crash_date';
   const freq = (req.query.freq || 'M').toUpperCase(); // 'M' or 'Y'
 
+  const filters = parseFilters(req.query.filters);
+
   const bucketFn = freq === 'Y' ? yBucket : monthKey;
   const buckets = new Map();
 
   for (const c of crashes) {
+    if (!recordMatchesFilters(c, filters)) continue;
     const d = c[dateCol];
     if (!d) continue;
     const key = bucketFn(d);
@@ -50,11 +143,14 @@ async function barCounts(req, res) {
   const cat = (req.query.cat || 'borough').toLowerCase();
   const top = parseInt(req.query.top || '12', 10);
 
+  const filters = parseFilters(req.query.filters);
+
   let counts;
 
   if (cat === 'vehicle_type') {
     const vt = [];
     for (const c of crashes) {
+      if (!recordMatchesFilters(c, filters)) continue;
       const v = [
         c.vehicle_type_code1,
         c.vehicle_type_code2,
@@ -68,14 +164,25 @@ async function barCounts(req, res) {
   } else if (cat === 'factor') {
     const fac = [];
     for (const c of crashes) {
+      if (!recordMatchesFilters(c, filters)) continue;
       if (notNull(c.contributing_factor_vehicle_1)) fac.push(c.contributing_factor_vehicle_1);
       if (notNull(c.contributing_factor_vehicle_2)) fac.push(c.contributing_factor_vehicle_2);
     }
     counts = tally(fac);
   } else if (cat === 'bodily_injury') {
-    counts = tally(persons.map((p) => p.bodily_injury));
+    const values = [];
+    for (const p of persons) {
+      if (!recordMatchesFilters(p, filters)) continue;
+      values.push(p.bodily_injury);
+    }
+    counts = tally(values);
   } else {
-    counts = tally(crashes.map((c) => c[cat]));
+    const values = [];
+    for (const c of crashes) {
+      if (!recordMatchesFilters(c, filters)) continue;
+      values.push(c[cat]);
+    }
+    counts = tally(values);
   }
 
   const data = sortTop(counts, top);
@@ -111,6 +218,8 @@ async function scatterXY(req, res) {
   const limit = parseInt(req.query.limit || '3000', 10);
   const from  = (req.query.from || 'crashes').toLowerCase();
 
+  const filters = parseFilters(req.query.filters);
+
   const src = from === 'persons' ? persons : crashes;
 
   const num = (v) => {
@@ -122,6 +231,7 @@ async function scatterXY(req, res) {
 
   const pts = [];
   for (const r of src) {
+    if (!recordMatchesFilters(r, filters)) continue;
     let xv = num(r[xKey]);
     let yv = num(r[yKey]);
     if (xv === null || yv === null) continue;
@@ -155,10 +265,13 @@ async function boxSummary(req, res) {
   const by = req.query.by || 'bodily_injury';
   const from = (req.query.from || 'persons').toLowerCase();
 
+  const filters = parseFilters(req.query.filters);
+
   const src = from === 'crashes' ? crashes : persons;
   const groups = new Map();
 
   for (const r of src) {
+    if (!recordMatchesFilters(r, filters)) continue;
     const g = (r[by] ?? 'Unknown').toString().trim() || 'Unknown';
     const v = toNumber(Number(r[col]));
     if (!notNull(v)) continue;
@@ -195,9 +308,12 @@ async function histogram(req, res) {
   const bins  = Math.max(1, parseInt(req.query.bins || '24', 10));
   const from  = (req.query.from || 'persons').toLowerCase();
 
+  const filters = parseFilters(req.query.filters);
+
   const src = from === 'crashes' ? crashes : persons;
   const values = [];
   for (const r of src) {
+    if (!recordMatchesFilters(r, filters)) continue;
     const v = Number(r[col]);
     if (Number.isFinite(v)) values.push(v);
   }
@@ -212,10 +328,14 @@ async function histogram(req, res) {
 async function corrMatrix(req, res) {
   const { crashes } = getData();
   const cols = (req.query.cols || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+  const filters = parseFilters(req.query.filters);
+
   if (cols.length < 2) return res.json({ z: [], x: cols, y: cols });
 
   const rows = [];
   for (const c of crashes) {
+    if (!recordMatchesFilters(c, filters)) continue;
     const row = cols.map((k) => toNumber(Number(c[k])));
     if (row.every(notNull)) rows.push(row);
   }

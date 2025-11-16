@@ -42,6 +42,8 @@ async function analytics(req, res) {
     const pie_cat = (req.query.pie_cat || 'bodily_injury').toString();
     const pie_top = Number.isFinite(+req.query.pie_top) ? +req.query.pie_top : 8;
 
+    const filters = req.query.filters;
+
     const [
       scatter,
       box,
@@ -55,31 +57,37 @@ async function analytics(req, res) {
         y: s_y,
         limit: String(s_limit),
         from: 'crashes',
+        filters,
       }),
 
       callHandler(boxSummary, {
         col: b_col,
         by: b_by,
         from: 'persons',
+        filters,
       }),
 
       callHandler(barCounts, {
         cat: bar_cat,
         top: String(bar_top),
+        filters,
       }),
 
       callHandler(lineByTime, {
         date_col: line_col,
         freq: line_freq,
+        filters,
       }),
 
       callHandler(corrMatrix, {
         cols: corr_cols.join(','),
+        filters,
       }),
 
       callHandler(pieCounts, {
         cat: pie_cat,
         top: String(pie_top),
+        filters,
       }),
     ]);
 
