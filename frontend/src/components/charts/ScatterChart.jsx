@@ -22,7 +22,7 @@ export default function ScatterChart() {
     <Plot
       data={[
         {
-          type: 'scatter',          // <- was 'scattergl'
+          type: 'scatter',
           mode: 'markers',
           x: dataXY.x,
           y: dataXY.y,

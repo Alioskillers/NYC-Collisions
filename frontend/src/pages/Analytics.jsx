@@ -209,218 +209,177 @@ export default function Analytics() {
   }, []);
 
   // --- Fetch charts whenever filters change ---
-  // --- Fetch charts whenever filters change ---
-useEffect(() => {
-  const controller = new AbortController();
-  setErr("");
-  setLoading(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    setErr("");
+    setLoading(true);
 
-  console.log("[Analytics] Applying filters:", filters);
+    (async () => {
+      const withOpts = (url) =>
+        fetchJSON(withFilters(url, filters), {
+          timeoutMs: 45000,
+          signal: controller.signal,
+        }).catch((e) => {
+          throw new Error(`${url} -> ${e.message || e}`);
+        });
 
-  (async () => {
-    const withOpts = (url) => {
-      const fullUrl = withFilters(url, filters);
-      console.log("[Analytics] Fetching:", fullUrl);
+      const calls = await Promise.allSettled([
+        withOpts("/api/eda/scatter?x=latitude&y=hour&limit=3000"),
+        withOpts("/api/eda/box?col=hour&by=bodily_injury"),
+        withOpts("/api/eda/hist?col=hour&bins=24&from=persons"),
+        withOpts("/api/eda/bar?cat=bodily_injury&top=12"),
+        withOpts("/api/eda/line?date_col=crash_date&freq=M"),
+        withOpts("/api/eda/corr?cols=latitude,hour"),
+        withOpts("/api/eda/pie?cat=bodily_injury&top=8"),
+      ]);
 
-      return fetchJSON(fullUrl, {
-        timeoutMs: 45000,
-        signal: controller.signal,
-      }).catch((e) => {
-        throw new Error(`${fullUrl} -> ${e.message || e}`);
-      });
-    };
+      const val = (i) => (calls[i].status === "fulfilled" ? calls[i].value : null);
+      const failures = calls
+        .filter((c) => c.status === "rejected")
+        .map((c) => c.reason?.message || String(c.reason));
 
-    const calls = await Promise.allSettled([
-      withOpts("/api/eda/scatter?x=latitude&y=hour&limit=3000"),
-      withOpts("/api/eda/box?col=hour&by=bodily_injury"),
-      withOpts("/api/eda/hist?col=hour&bins=24&from=persons"),
-      withOpts("/api/eda/bar?cat=bodily_injury&top=12"),
-      withOpts("/api/eda/line?date_col=crash_date&freq=M"),
-      withOpts("/api/eda/corr?cols=latitude,hour"),
-      withOpts("/api/eda/pie?cat=bodily_injury&top=8"),
-    ]);
+      const scatterFig = ensureFigure(
+        "scatter",
+        val(0),
+        (p) =>
+          p && p.x && p.y
+            ? {
+                data: [
+                  {
+                    type: "scatter",
+                    mode: "markers",
+                    x: p.x,
+                    y: p.y,
+                    marker: { size: 4, opacity: 0.5 },
+                  },
+                ],
+                layout: { xaxis: { title: "latitude" }, yaxis: { title: "hour" } },
+              }
+            : null,
+        500
+      );
 
-    const val = (i) =>
-      calls[i].status === "fulfilled" ? calls[i].value : null;
+      const boxFig = ensureFigure(
+        "box",
+        val(1),
+        (p) =>
+          p && Array.isArray(p.series)
+            ? {
+                data: p.series.map((s) => ({
+                  type: "box",
+                  name: s.name ?? "Unknown",
+                  y: (s.y ?? []).map(Number),
+                  boxpoints: "outliers",
+                  jitter: 0.3,
+                  pointpos: 0,
+                })),
+                layout: { xaxis: { title: "bodily_injury" }, yaxis: { title: "hour" } },
+              }
+            : null,
+        450
+      );
 
-    const failures = calls
-      .filter((c) => c.status === "rejected")
-      .map((c) => c.reason?.message || String(c.reason));
-
-    // Log a small snapshot of each response
-    console.log("[Analytics] scatter response:", val(0)?.data || val(0));
-    console.log("[Analytics] bar response:", val(3)?.data || val(3));
-    console.log("[Analytics] line response:", val(4)?.data || val(4));
-
-    const scatterFig = ensureFigure(
-      "scatter",
-      val(0),
-      (p) =>
-        p && p.x && p.y
-          ? {
-              data: [
-                {
-                  type: "scatter",
-                  mode: "markers",
-                  x: p.x,
-                  y: p.y,
-                  marker: { size: 4, opacity: 0.5 },
-                },
-              ],
-              layout: { xaxis: { title: "latitude" }, yaxis: { title: "hour" } },
-            }
-          : null,
-      500
-    );
-
-    const boxFig = ensureFigure(
-      "box",
-      val(1),
-      (p) =>
-        p && Array.isArray(p.series)
-          ? {
-              data: p.series.map((s) => ({
-                type: "box",
-                name: s.name ?? "Unknown",
-                y: (s.y ?? []).map(Number),
-                boxpoints: "outliers",
-                jitter: 0.3,
-                pointpos: 0,
-              })),
-              layout: {
-                xaxis: { title: "bodily_injury" },
-                yaxis: { title: "hour" },
-              },
-            }
-          : null,
-      450
-    );
-
-    const histFig = ensureFigure(
-      "hist",
-      val(2),
-      (p) =>
-        p && Array.isArray(p.values)
-          ? {
-              data: [
-                {
+      const histFig = ensureFigure(
+        "hist",
+        val(2),
+        (p) =>
+          p && Array.isArray(p.values)
+            ? {
+                data: [{
                   type: "histogram",
                   x: p.values,
                   nbinsx: p.bins ?? 24,
                   marker: { line: { color: "rgba(0,0,0,0.25)", width: 1 } },
                   opacity: 0.9,
-                },
-              ],
-              layout: { xaxis: { title: "hour" }, yaxis: { title: "count" } },
-            }
-          : null,
-      420
-    );
+                }],
+                layout: { xaxis: { title: "hour" }, yaxis: { title: "count" } },
+              }
+            : null,
+        420
+      );
 
-    const barFig = ensureFigure(
-      "bar",
-      val(3),
-      (p) =>
-        p && p.x && p.y
-          ? {
-              data: [
-                {
+      const barFig = ensureFigure(
+        "bar",
+        val(3),
+        (p) =>
+          p && p.x && p.y
+            ? {
+                data: [{
                   type: "bar",
                   x: p.x,
                   y: p.y,
                   marker: { line: { color: "rgba(0,0,0,0.25)", width: 1 } },
                   opacity: 0.95,
-                },
-              ],
-              layout: { xaxis: { title: "bodily_injury" }, yaxis: { title: "count" } },
-            }
-          : null,
-      420
-    );
+                }],
+                layout: { xaxis: { title: "bodily_injury" }, yaxis: { title: "count" } },
+              }
+            : null,
+        420
+      );
 
-    const lineFig = ensureFigure(
-      "line",
-      val(4),
-      (p) =>
-        p && p.x && p.y
-          ? {
-              data: [
-                {
-                  type: "scatter",
-                  mode: "lines+markers",
-                  x: p.x,
-                  y: p.y,
-                },
-              ],
-              layout: { xaxis: { title: "month" }, yaxis: { title: "count" } },
-            }
-          : null,
-      420
-    );
+      const lineFig = ensureFigure(
+        "line",
+        val(4),
+        (p) =>
+          p && p.x && p.y
+            ? {
+                data: [{ type: "scatter", mode: "lines+markers", x: p.x, y: p.y }],
+                layout: { xaxis: { title: "month" }, yaxis: { title: "count" } },
+              }
+            : null,
+        420
+      );
 
-    const corrFig = ensureFigure(
-      "corr",
-      val(5),
-      (p) =>
-        p && p.z && p.x && p.y
-          ? {
-              data: [
-                {
-                  type: "heatmap",
-                  z: p.z,
-                  x: p.x,
-                  y: p.y,
-                  colorscale: "RdBu",
-                  reversescale: true,
-                  zmin: -1,
-                  zmax: 1,
-                },
-              ],
-              layout: { xaxis: { title: "variables" }, yaxis: { title: "variables" } },
-            }
-          : null,
-      520
-    );
+      const corrFig = ensureFigure(
+        "corr",
+        val(5),
+        (p) =>
+          p && p.z && p.x && p.y
+            ? {
+                data: [
+                  {
+                    type: "heatmap",
+                    z: p.z,
+                    x: p.x,
+                    y: p.y,
+                    colorscale: "RdBu",
+                    reversescale: true,
+                    zmin: -1,
+                    zmax: 1,
+                  },
+                ],
+                layout: { xaxis: { title: "variables" }, yaxis: { title: "variables" } },
+              }
+            : null,
+        520
+      );
 
-    const pieFig = ensureFigure(
-      "pie",
-      val(6),
-      (p) =>
-        p && p.labels && p.values
-          ? {
-              data: [
-                {
-                  type: "pie",
-                  labels: p.labels,
-                  values: p.values,
-                  hole: 0.35,
-                },
-              ],
-            }
-          : null,
-      420
-    );
+      const pieFig = ensureFigure(
+        "pie",
+        val(6),
+        (p) =>
+          p && p.labels && p.values
+            ? { data: [{ type: "pie", labels: p.labels, values: p.values, hole: 0.35 }] }
+            : null,
+        420
+      );
 
-    setFigs({
-      scatter: scatterFig,
-      box: boxFig,
-      hist: histFig,
-      bar: barFig,
-      line: lineFig,
-      corr: corrFig,
-      pie: pieFig,
-    });
+      setFigs({
+        scatter: scatterFig,
+        box: boxFig,
+        hist: histFig,
+        bar: barFig,
+        line: lineFig,
+        corr: corrFig,
+        pie: pieFig,
+      });
 
-    if (failures.length) {
-      console.warn("[Analytics] Some requests failed:", failures);
-      setErr(failures.join(" | "));
-    }
+      if (failures.length) setErr(failures.join(" | "));
+      setLoading(false);
+    })();
 
-    setLoading(false);
-  })();
-
-  return () => controller.abort("route-change");
-}, [filters]);
+    return () => controller.abort("route-change");
+  }, [filters]);
 
   const resetFilters = () =>
     setSelected({ borough: [], year: [], vehicle_type: [], factor: [], bodily_injury: [] });
