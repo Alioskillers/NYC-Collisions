@@ -10,7 +10,7 @@ import {
   Box,
   Skeleton,
 } from "@mui/material";
-import { useNavigate, Link, RouterLink } from "react-router-dom";
+import { useNavigate, Link as RouterLink } from "react-router-dom";
 
 const nf = new Intl.NumberFormat();
 
