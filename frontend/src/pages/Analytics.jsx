@@ -14,7 +14,7 @@ import {
   Button,
   Tooltip,
   Typography,
-  CircularProgress,
+  Divider,
 } from "@mui/material";
 import PlotCard from "../components/PlotCard.jsx";
 import { fetchJSON } from "../lib/api";
@@ -66,21 +66,26 @@ function ensureFigure(name, payload, fallbackBuilder, height = 420) {
   };
 }
 
+// --- Build backend-friendly filters [{ col, op, val }] ---
 function buildFilters(selected) {
   const out = [];
 
   if (selected?.borough?.length) {
     out.push({ col: "borough", op: "in", val: selected.borough });
   }
+
   if (selected?.vehicle_type?.length) {
     out.push({ col: "vehicle_type", op: "in", val: selected.vehicle_type });
   }
+
   if (selected?.factor?.length) {
     out.push({ col: "factor", op: "in", val: selected.factor });
   }
+
   if (selected?.bodily_injury?.length) {
     out.push({ col: "bodily_injury", op: "in", val: selected.bodily_injury });
   }
+
   if (selected?.year?.length) {
     const rx = "^" + selected.year.map(String).join("|^");
     out.push({ col: "crash_date", op: "contains", val: rx });
@@ -89,12 +94,20 @@ function buildFilters(selected) {
   return out;
 }
 
+// --- Append filters as a query param ---
 function withFilters(url, filters) {
   if (!filters || !filters.length) return url;
-  const f = encodeURIComponent(JSON.stringify(filters));
+  const raw = JSON.stringify(filters);
+  const f = encodeURIComponent(raw);
+
+  // DEBUG: log URLs being called
+  console.log("[withFilters] url:", url);
+  console.log("[withFilters] filters JSON:", raw);
+
   return url + (url.includes("?") ? "&" : "?") + `filters=${f}`;
 }
 
+// --- Simple reusable multi-select ---
 function MultiSelect({ label, value, onChange, options, placeholder = "All" }) {
   return (
     <FormControl size="small" sx={{ minWidth: 220 }}>
@@ -130,6 +143,7 @@ export default function Analytics() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // --- Dynamic filter state ---
   const [boroughs, setBoroughs] = useState([]);
   const [years, setYears] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
@@ -144,7 +158,13 @@ export default function Analytics() {
     bodily_injury: [],
   });
 
-  const filters = useMemo(() => buildFilters(selected), [selected]);
+  // Convert UI selections -> backend filters
+  const filters = useMemo(() => {
+    const f = buildFilters(selected);
+    console.log("[useMemo] selected:", selected);
+    console.log("[useMemo] built filters:", f);
+    return f;
+  }, [selected]);
 
   const [figs, setFigs] = useState({
     scatter: null,
@@ -156,22 +176,27 @@ export default function Analytics() {
     pie: null,
   });
 
+  // --- Fetch distinct values for dropdowns (re-usable via existing endpoints) ---
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         setErr("");
-        const [boroughBar, vtBar, factorBar, injuryBar, yearLine] = await Promise.all([
-          fetchJSON("/api/eda/bar?cat=borough&top=1000"),
-          fetchJSON("/api/eda/bar?cat=vehicle_type&top=1000"),
-          fetchJSON("/api/eda/bar?cat=factor&top=1000"),
-          fetchJSON("/api/eda/bar?cat=bodily_injury&top=1000"),
-          fetchJSON("/api/eda/line?date_col=crash_date&freq=Y"),
-        ]);
+        console.log("[INIT] fetching dropdown options...");
+
+        const [boroughBar, vtBar, factorBar, injuryBar, yearLine] =
+          await Promise.all([
+            fetchJSON("/api/eda/bar?cat=borough&top=1000"),
+            fetchJSON("/api/eda/bar?cat=vehicle_type&top=1000"),
+            fetchJSON("/api/eda/bar?cat=factor&top=1000"),
+            fetchJSON("/api/eda/bar?cat=bodily_injury&top=1000"),
+            fetchJSON("/api/eda/line?date_col=crash_date&freq=Y"),
+          ]);
+
         if (!alive) return;
 
         const safeLabels = (p) =>
-          (p?.data?.[0]?.x || p?.x || p?.labels || []).map((v) => String(v));
+          (p?.data?.[0]?.x || p?.x || p?.labels || []).map(String);
 
         const bOpts = safeLabels(boroughBar);
         const vtOpts = safeLabels(vtBar);
@@ -181,7 +206,15 @@ export default function Analytics() {
         const yXs = (yearLine?.data?.[0]?.x || yearLine?.x || []).map((s) =>
           String(s).slice(0, 4)
         );
-        const yOpts = Array.from(new Set(yXs)).filter((y) => /^(19|20)\d{2}$/.test(y));
+        const yOpts = Array.from(new Set(yXs)).filter((y) =>
+          /^(19|20)\d{2}$/.test(y)
+        );
+
+        console.log("[INIT] borough options:", bOpts);
+        console.log("[INIT] vehicle type options:", vtOpts);
+        console.log("[INIT] factor options:", fOpts);
+        console.log("[INIT] injury options:", iOpts);
+        console.log("[INIT] year options:", yOpts);
 
         setBoroughs(bOpts);
         setVehicleTypes(vtOpts);
@@ -189,6 +222,7 @@ export default function Analytics() {
         setInjuryTypes(iOpts);
         setYears(yOpts);
       } catch (e) {
+        console.error("[INIT] error:", e);
         setErr(String(e?.message || e));
       }
     })();
@@ -197,10 +231,15 @@ export default function Analytics() {
     };
   }, []);
 
+  // --- Fetch charts whenever filters change ---
   useEffect(() => {
     const controller = new AbortController();
     setErr("");
     setLoading(true);
+
+    console.log("====================================");
+    console.log("[EFFECT] Fetching charts with filters:", filters);
+    console.log("====================================");
 
     (async () => {
       const withOpts = (url) =>
@@ -221,10 +260,16 @@ export default function Analytics() {
         withOpts("/api/eda/pie?cat=bodily_injury&top=8"),
       ]);
 
-      const val = (i) => (calls[i].status === "fulfilled" ? calls[i].value : null);
+      const val = (i) =>
+        calls[i].status === "fulfilled" ? calls[i].value : null;
       const failures = calls
         .filter((c) => c.status === "rejected")
         .map((c) => c.reason?.message || String(c.reason));
+
+      console.log("[EFFECT] calls settled:", calls);
+      if (failures.length) {
+        console.warn("[EFFECT] some calls failed:", failures);
+      }
 
       const scatterFig = ensureFigure(
         "scatter",
@@ -241,7 +286,10 @@ export default function Analytics() {
                     marker: { size: 4, opacity: 0.5 },
                   },
                 ],
-                layout: { xaxis: { title: "latitude" }, yaxis: { title: "hour" } },
+                layout: {
+                  xaxis: { title: "latitude" },
+                  yaxis: { title: "hour" },
+                },
               }
             : null,
         500
@@ -261,7 +309,10 @@ export default function Analytics() {
                   jitter: 0.3,
                   pointpos: 0,
                 })),
-                layout: { xaxis: { title: "bodily_injury" }, yaxis: { title: "hour" } },
+                layout: {
+                  xaxis: { title: "bodily_injury" },
+                  yaxis: { title: "hour" },
+                },
               }
             : null,
         450
@@ -282,7 +333,10 @@ export default function Analytics() {
                     opacity: 0.9,
                   },
                 ],
-                layout: { xaxis: { title: "hour" }, yaxis: { title: "count" } },
+                layout: {
+                  xaxis: { title: "hour" },
+                  yaxis: { title: "count" },
+                },
               }
             : null,
         420
@@ -303,7 +357,10 @@ export default function Analytics() {
                     opacity: 0.95,
                   },
                 ],
-                layout: { xaxis: { title: "bodily_injury" }, yaxis: { title: "count" } },
+                layout: {
+                  xaxis: { title: "bodily_injury" },
+                  yaxis: { title: "count" },
+                },
               }
             : null,
         420
@@ -316,8 +373,17 @@ export default function Analytics() {
           p && p.x && p.y
             ? {
                 data: [
-                  { type: "scatter", mode: "lines+markers", x: p.x, y: p.y } ],
-                layout: { xaxis: { title: "month" }, yaxis: { title: "count" } },
+                  {
+                    type: "scatter",
+                    mode: "lines+markers",
+                    x: p.x,
+                    y: p.y,
+                  },
+                ],
+                layout: {
+                  xaxis: { title: "month" },
+                  yaxis: { title: "count" },
+                },
               }
             : null,
         420
@@ -341,7 +407,10 @@ export default function Analytics() {
                     zmax: 1,
                   },
                 ],
-                layout: { xaxis: { title: "variables" }, yaxis: { title: "variables" } },
+                layout: {
+                  xaxis: { title: "variables" },
+                  yaxis: { title: "variables" },
+                },
               }
             : null,
         520
@@ -354,7 +423,12 @@ export default function Analytics() {
           p && p.labels && p.values
             ? {
                 data: [
-                  { type: "pie", labels: p.labels, values: p.values, hole: 0.35 },
+                  {
+                    type: "pie",
+                    labels: p.labels,
+                    values: p.values,
+                    hole: 0.35,
+                  },
                 ],
               }
             : null,
@@ -376,7 +450,7 @@ export default function Analytics() {
     })();
 
     return () => controller.abort("route-change");
-  }, [filters]);
+  }, [JSON.stringify(filters)]); // <--- IMPORTANT: stringify so deep changes retrigger
 
   const resetFilters = () =>
     setSelected({
@@ -387,24 +461,11 @@ export default function Analytics() {
       bodily_injury: [],
     });
 
-  const hasAnyFilter =
-    selected.borough.length ||
-    selected.year.length ||
-    selected.vehicle_type.length ||
-    selected.factor.length ||
-    selected.bodily_injury.length;
+  const activeFiltersCount = filters.length;
 
   return (
-    <Container maxWidth="xl" sx={{ py: 0, px: { xs: 0, md: 2 } }}>
-      <Box sx={{ px: 2, pt: 2 }}>
-        <Typography variant="h5" fontWeight={600} gutterBottom>
-          Collision Analytics
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Interactively explore NYC collisions using the filters below.
-        </Typography>
-      </Box>
-
+    <Container maxWidth={false} sx={{ py: 0, px: 0 }}>
+      {/* Filters toolbar */}
       <Box
         sx={{
           px: 2,
@@ -425,31 +486,41 @@ export default function Analytics() {
           <MultiSelect
             label="Borough"
             value={selected.borough}
-            onChange={(v) => setSelected((s) => ({ ...s, borough: v }))}
+            onChange={(v) =>
+              setSelected((s) => ({ ...s, borough: v }))
+            }
             options={boroughs}
           />
           <MultiSelect
             label="Year"
             value={selected.year}
-            onChange={(v) => setSelected((s) => ({ ...s, year: v }))}
+            onChange={(v) =>
+              setSelected((s) => ({ ...s, year: v }))
+            }
             options={years}
           />
           <MultiSelect
             label="Vehicle Type"
             value={selected.vehicle_type}
-            onChange={(v) => setSelected((s) => ({ ...s, vehicle_type: v }))}
+            onChange={(v) =>
+              setSelected((s) => ({ ...s, vehicle_type: v }))
+            }
             options={vehicleTypes}
           />
           <MultiSelect
             label="Contributing Factor"
             value={selected.factor}
-            onChange={(v) => setSelected((s) => ({ ...s, factor: v }))}
+            onChange={(v) =>
+              setSelected((s) => ({ ...s, factor: v }))
+            }
             options={factors}
           />
           <MultiSelect
             label="Injury Type"
             value={selected.bodily_injury}
-            onChange={(v) => setSelected((s) => ({ ...s, bodily_injury: v }))}
+            onChange={(v) =>
+              setSelected((s) => ({ ...s, bodily_injury: v }))
+            }
             options={injuryTypes}
           />
           <Tooltip title="Clear all filters">
@@ -461,27 +532,38 @@ export default function Analytics() {
           </Tooltip>
         </Stack>
 
-        <Box sx={{ mt: 1 }}>
-          <Typography variant="caption" color="text.secondary">
-            {loading
-              ? "Updating charts with current filters..."
-              : hasAnyFilter
-              ? "Filters applied. Charts reflect the selected subset of collisions."
-              : "No filters applied. Showing statistics for all loaded collisions."}
+        {/* Small debug box */}
+        <Box sx={{ mt: 1.5 }}>
+          <Typography variant="caption" sx={{ color: "text.secondary" }}>
+            Active filters: {activeFiltersCount} {loading ? " | Loading…" : ""}
           </Typography>
         </Box>
+      </Box>
+
+      {/* Optional: more detailed debug view (can remove later) */}
+      <Box sx={{ px: 2, py: 1 }}>
+        <Typography variant="subtitle2">Debug: selected filters</Typography>
+        <Typography
+          variant="caption"
+          component="pre"
+          sx={{
+            maxHeight: 140,
+            overflow: "auto",
+            bgcolor: "#fafafa",
+            p: 1,
+            borderRadius: 1,
+            border: "1px solid #eee",
+          }}
+        >
+          {JSON.stringify(selected, null, 2)}
+        </Typography>
+        <Divider sx={{ mt: 1.5 }} />
       </Box>
 
       {err && (
         <Alert severity="warning" sx={{ m: 2 }}>
           {err}
         </Alert>
-      )}
-
-      {loading && !figs.scatter && (
-        <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
-          <CircularProgress size={32} />
-        </Box>
       )}
 
       {figs.scatter && (
