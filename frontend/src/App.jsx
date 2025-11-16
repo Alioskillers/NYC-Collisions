@@ -6,6 +6,7 @@ import { useLocation } from "react-router-dom";
 import AppHeader from "./components/AppHeader";
 import Home from "./pages/Home";
 import Analytics from "./pages/Analytics";
+import AccidentMap from "./pages/AccidentMap"; // ⬅️ NEW
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -30,6 +31,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/map" element={<AccidentMap />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Box>

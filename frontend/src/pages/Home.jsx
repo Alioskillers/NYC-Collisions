@@ -199,6 +199,9 @@ export default function Home() {
           >
             View Analytics
           </Button>
+          <Button color="inherit" size="large" sx={{ ml: 2 }} onClick={() => navigate("/map")}>
+  Map
+</Button>
         </Container>
       </Box>
     </>
