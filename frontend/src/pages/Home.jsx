@@ -10,7 +10,7 @@ import {
   Box,
   Skeleton,
 } from "@mui/material";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link, RouterLink } from "react-router-dom";
 
 const nf = new Intl.NumberFormat();
 
@@ -199,9 +199,25 @@ export default function Home() {
           >
             View Analytics
           </Button>
-          <Button color="inherit" size="large" sx={{ ml: 2 }} onClick={() => navigate("/map")}>
-  Map
-</Button>
+          <Box
+              sx={{
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Button
+                variant="contained"
+                color="primary"
+                size="large"
+                component={RouterLink}
+                to="/map"
+                sx={{ borderRadius: 3, px: 3 }}
+              >
+                View Accident Map
+              </Button>
+            </Box>
         </Container>
       </Box>
     </>
