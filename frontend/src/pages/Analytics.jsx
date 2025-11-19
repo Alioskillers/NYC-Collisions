@@ -102,10 +102,6 @@ function withFilters(url, filters) {
   const raw = JSON.stringify(filters);
   const f = encodeURIComponent(raw);
 
-  // DEBUG: log URLs being called
-  console.log("[withFilters] url:", url);
-  console.log("[withFilters] filters JSON:", raw);
-
   return url + (url.includes("?") ? "&" : "?") + `filters=${f}`;
 }
 
@@ -141,84 +137,39 @@ function MultiSelect({ label, value, onChange, options, placeholder = "All" }) {
   );
 }
 
+const emptySelection = {
+  borough: [],
+  year: [],
+  vehicle_type: [],
+  factor: [],
+  bodily_injury: [],
+};
+
 export default function Analytics() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // --- Dynamic filter state ---
+  // --- Dynamic filter options ---
   const [boroughs, setBoroughs] = useState([]);
   const [years, setYears] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
   const [factors, setFactors] = useState([]);
   const [injuryTypes, setInjuryTypes] = useState([]);
 
-  const [selected, setSelected] = useState({
-    borough: [],
-    year: [],
-    vehicle_type: [],
-    factor: [],
-    bodily_injury: [],
-  });
+  // UI-selected filters (what user is editing in dropdowns)
+  const [selected, setSelected] = useState(emptySelection);
+  // Applied filters (what charts are currently using)
+  const [appliedSelected, setAppliedSelected] = useState(emptySelection);
 
   const [search, setSearch] = useState("");
 
-  const filteredBoroughs = useMemo(
-    () =>
-      !search.trim()
-        ? boroughs
-        : boroughs.filter((b) =>
-            String(b).toLowerCase().includes(search.trim().toLowerCase())
-          ),
-    [boroughs, search]
-  );
-
-  const filteredYears = useMemo(
-    () =>
-      !search.trim()
-        ? years
-        : years.filter((y) =>
-            String(y).toLowerCase().includes(search.trim().toLowerCase())
-          ),
-    [years, search]
-  );
-
-  const filteredVehicleTypes = useMemo(
-    () =>
-      !search.trim()
-        ? vehicleTypes
-        : vehicleTypes.filter((v) =>
-            String(v).toLowerCase().includes(search.trim().toLowerCase())
-          ),
-    [vehicleTypes, search]
-  );
-
-  const filteredFactors = useMemo(
-    () =>
-      !search.trim()
-        ? factors
-        : factors.filter((f) =>
-            String(f).toLowerCase().includes(search.trim().toLowerCase())
-          ),
-    [factors, search]
-  );
-
-  const filteredInjuryTypes = useMemo(
-    () =>
-      !search.trim()
-        ? injuryTypes
-        : injuryTypes.filter((i) =>
-            String(i).toLowerCase().includes(search.trim().toLowerCase())
-          ),
-    [injuryTypes, search]
-  );
-
-  // Convert UI selections -> backend filters
+  // Convert applied selections -> backend filters
   const filters = useMemo(() => {
-    const f = buildFilters(selected);
-    console.log("[useMemo] selected:", selected);
+    const f = buildFilters(appliedSelected);
+    console.log("[useMemo] appliedSelected:", appliedSelected);
     console.log("[useMemo] built filters:", f);
     return f;
-  }, [selected]);
+  }, [appliedSelected]);
 
   const [figs, setFigs] = useState({
     scatter: null,
@@ -264,12 +215,6 @@ export default function Analytics() {
           /^(19|20)\d{2}$/.test(y)
         );
 
-        console.log("[INIT] borough options:", bOpts);
-        console.log("[INIT] vehicle type options:", vtOpts);
-        console.log("[INIT] factor options:", fOpts);
-        console.log("[INIT] injury options:", iOpts);
-        console.log("[INIT] year options:", yOpts);
-
         setBoroughs(bOpts);
         setVehicleTypes(vtOpts);
         setFactors(fOpts);
@@ -285,7 +230,7 @@ export default function Analytics() {
     };
   }, []);
 
-  // --- Fetch charts whenever filters change ---
+  // --- Fetch charts whenever APPLIED filters change ---
   useEffect(() => {
     const controller = new AbortController();
     setErr("");
@@ -320,7 +265,6 @@ export default function Analytics() {
         .filter((c) => c.status === "rejected")
         .map((c) => c.reason?.message || String(c.reason));
 
-      console.log("[EFFECT] calls settled:", calls);
       if (failures.length) {
         console.warn("[EFFECT] some calls failed:", failures);
       }
@@ -504,18 +448,54 @@ export default function Analytics() {
     })();
 
     return () => controller.abort("route-change");
-  }, [JSON.stringify(filters)]); // <--- IMPORTANT: stringify so deep changes retrigger
+  }, [JSON.stringify(filters)]);
 
-  const resetFilters = () =>
-    setSelected({
-      borough: [],
-      year: [],
-      vehicle_type: [],
-      factor: [],
-      bodily_injury: [],
-    });
+  const resetFilters = () => {
+    setSelected(emptySelection);
+    setAppliedSelected(emptySelection);
+    setSearch("");
+  };
 
-  const activeFiltersCount = filters.length;
+  const activeFiltersCount = buildFilters(appliedSelected).length;
+
+  // --- Handle natural-language search + Generate Report ---
+  const handleGenerate = () => {
+    let next = { ...selected };
+
+    const q = search.trim().toLowerCase();
+    if (q) {
+      // Auto-detect boroughs mentioned in the query
+      const bMatches = boroughs.filter((b) =>
+        q.includes(String(b).toLowerCase())
+      );
+      if (bMatches.length) next.borough = bMatches;
+
+      // Auto-detect years (e.g., 2019, 2020, 2022)
+      const yMatches = years.filter((y) => q.includes(String(y)));
+      if (yMatches.length) next.year = yMatches;
+
+      // Auto-detect injury types
+      const iMatches = injuryTypes.filter((i) =>
+        q.includes(String(i).toLowerCase())
+      );
+      if (iMatches.length) next.bodily_injury = iMatches;
+
+      // Auto-detect vehicle types
+      const vtMatches = vehicleTypes.filter((v) =>
+        q.includes(String(v).toLowerCase())
+      );
+      if (vtMatches.length) next.vehicle_type = vtMatches;
+
+      // Auto-detect contributing factors
+      const fMatches = factors.filter((f) =>
+        q.includes(String(f).toLowerCase())
+      );
+      if (fMatches.length) next.factor = fMatches;
+    }
+
+    setSelected(next);
+    setAppliedSelected(next);
+  };
 
   return (
     <Container maxWidth={false} sx={{ py: 0, px: 0 }}>
@@ -533,42 +513,76 @@ export default function Analytics() {
           backdropFilter: "blur(10px)",
         }}
       >
-        {/* Top row: title + search + status */}
+        {/* Top row: title + status */}
         <Stack
           direction={{ xs: "column", md: "row" }}
           spacing={1.5}
           alignItems={{ xs: "flex-start", md: "center" }}
           justifyContent="space-between"
-          sx={{ mb: 1.5 }}
         >
-          <Box>
-            <Typography variant="h6" fontWeight={600} sx={{ lineHeight: 1.2 }}>
-              NYC Collision Analytics
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Data visualizations and trends for NYC vehicle collisions
-            </Typography>
-          </Box>
+          <Typography variant="h6" fontWeight={600} sx={{ lineHeight: 1.2 }}>
+            NYC Collision Analytics
+          </Typography>
+
+          <Typography
+            variant="caption"
+            sx={{
+              color: "text.secondary",
+              textAlign: { xs: "left", md: "right" },
+            }}
+          >
+            Active filters: {activeFiltersCount}
+            {loading ? " | Generating report…" : ""}
+          </Typography>
+        </Stack>
+
+        {/* Second row: centered search + Generate Report */}
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={1}
+          alignItems="center"
+          justifyContent="center"
+          sx={{ mt: 1.5, mb: 1.5 }}
+        >
           <TextField
             size="small"
-            placeholder="Search within filter options..."
+            placeholder='Search e.g. "Brooklyn 2022 pedestrian crashes"'
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleGenerate();
+              }
+            }}
             sx={{
-              width: 270,
+              width: { xs: "100%", sm: 420, md: 520 },
               bgcolor: "background.paper",
-              borderRadius: 1,
-              boxShadow: "0 1px 4px rgba(0,0,0,0.03)",
+              borderRadius: 999,
+              boxShadow: "0 1px 6px rgba(0,0,0,0.06)",
             }}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
-                  <SearchIcon fontSize="small" sx={{ color: "text.secondary" }} />
+                  <SearchIcon
+                    fontSize="small"
+                    sx={{ color: "text.secondary" }}
+                  />
                 </InputAdornment>
               ),
             }}
           />
+          <Button
+            variant="contained"
+            onClick={handleGenerate}
+            disabled={loading}
+            sx={{ borderRadius: 999, px: 3, mt: { xs: 1, md: 0 } }}
+          >
+            Generate Report
+          </Button>
         </Stack>
+
+        {/* Third row: dropdown filters */}
         <Stack
           direction={{ xs: "column", md: "row" }}
           spacing={1.5}
@@ -577,36 +591,44 @@ export default function Analytics() {
           <MultiSelect
             label="Borough"
             value={selected.borough}
-            onChange={v => setSelected(s => ({ ...s, borough: v }))}
-            options={filteredBoroughs}
+            onChange={(v) => setSelected((s) => ({ ...s, borough: v }))}
+            options={boroughs}
           />
           <MultiSelect
             label="Year"
             value={selected.year}
-            onChange={v => setSelected(s => ({ ...s, year: v }))}
-            options={filteredYears}
+            onChange={(v) => setSelected((s) => ({ ...s, year: v }))}
+            options={years}
           />
           <MultiSelect
             label="Vehicle Type"
             value={selected.vehicle_type}
-            onChange={v => setSelected(s => ({ ...s, vehicle_type: v }))}
-            options={filteredVehicleTypes}
+            onChange={(v) =>
+              setSelected((s) => ({ ...s, vehicle_type: v }))
+            }
+            options={vehicleTypes}
           />
           <MultiSelect
             label="Contributing Factor"
             value={selected.factor}
-            onChange={v => setSelected(s => ({ ...s, factor: v }))}
-            options={filteredFactors}
+            onChange={(v) => setSelected((s) => ({ ...s, factor: v }))}
+            options={factors}
           />
           <MultiSelect
             label="Injury Type"
             value={selected.bodily_injury}
-            onChange={v => setSelected(s => ({ ...s, bodily_injury: v }))}
-            options={filteredInjuryTypes}
+            onChange={(v) =>
+              setSelected((s) => ({ ...s, bodily_injury: v }))
+            }
+            options={injuryTypes}
           />
           <Tooltip title="Clear all filters">
             <span>
-              <Button variant="outlined" onClick={resetFilters} disabled={loading}>
+              <Button
+                variant="outlined"
+                onClick={resetFilters}
+                disabled={loading}
+              >
                 Reset
               </Button>
             </span>
