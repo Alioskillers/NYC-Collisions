@@ -14,8 +14,10 @@ import {
   Button,
   Tooltip,
   Typography,
-  Divider,
+  TextField,
+  InputAdornment,
 } from "@mui/material";
+import SearchIcon from "@mui/icons-material/Search";
 import PlotCard from "../components/PlotCard.jsx";
 import { fetchJSON } from "../lib/api";
 
@@ -157,6 +159,8 @@ export default function Analytics() {
     factor: [],
     bodily_injury: [],
   });
+
+  const [search, setSearch] = useState("");
 
   // Convert UI selections -> backend filters
   const filters = useMemo(() => {
@@ -476,8 +480,49 @@ export default function Analytics() {
           top: 0,
           zIndex: 1,
           bgcolor: "background.paper",
+          backdropFilter: "blur(10px)",
         }}
       >
+        {/* Top row: title + search + status */}
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={1.5}
+          alignItems={{ xs: "flex-start", md: "center" }}
+          justifyContent="space-between"
+          sx={{ mb: 1.5 }}
+        >
+          <Box>
+            <Typography variant="h6" fontWeight={600} sx={{ lineHeight: 1.2 }}>
+              NYC Collision Analytics
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Data visualizations and trends for NYC vehicle collisions
+            </Typography>
+          </Box>
+          <TextField
+            size="small"
+            placeholder="Search (coming soon)"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            sx={{
+              width: 270,
+              bgcolor: "background.paper",
+              borderRadius: 1,
+              boxShadow: "0 1px 4px rgba(0,0,0,0.03)",
+            }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" sx={{ color: "text.secondary" }} />
+                </InputAdornment>
+              ),
+              readOnly: true,
+            }}
+          />
+          <Typography variant="caption" sx={{ color: "text.secondary", minWidth: 120, textAlign: "right" }}>
+            Active filters: {activeFiltersCount} {loading ? " | Loading…" : ""}
+          </Typography>
+        </Stack>
         <Stack
           direction={{ xs: "column", md: "row" }}
           spacing={1.5}
@@ -486,41 +531,31 @@ export default function Analytics() {
           <MultiSelect
             label="Borough"
             value={selected.borough}
-            onChange={(v) =>
-              setSelected((s) => ({ ...s, borough: v }))
-            }
+            onChange={v => setSelected(s => ({ ...s, borough: v }))}
             options={boroughs}
           />
           <MultiSelect
             label="Year"
             value={selected.year}
-            onChange={(v) =>
-              setSelected((s) => ({ ...s, year: v }))
-            }
+            onChange={v => setSelected(s => ({ ...s, year: v }))}
             options={years}
           />
           <MultiSelect
             label="Vehicle Type"
             value={selected.vehicle_type}
-            onChange={(v) =>
-              setSelected((s) => ({ ...s, vehicle_type: v }))
-            }
+            onChange={v => setSelected(s => ({ ...s, vehicle_type: v }))}
             options={vehicleTypes}
           />
           <MultiSelect
             label="Contributing Factor"
             value={selected.factor}
-            onChange={(v) =>
-              setSelected((s) => ({ ...s, factor: v }))
-            }
+            onChange={v => setSelected(s => ({ ...s, factor: v }))}
             options={factors}
           />
           <MultiSelect
             label="Injury Type"
             value={selected.bodily_injury}
-            onChange={(v) =>
-              setSelected((s) => ({ ...s, bodily_injury: v }))
-            }
+            onChange={v => setSelected(s => ({ ...s, bodily_injury: v }))}
             options={injuryTypes}
           />
           <Tooltip title="Clear all filters">
@@ -531,33 +566,6 @@ export default function Analytics() {
             </span>
           </Tooltip>
         </Stack>
-
-        {/* Small debug box */}
-        <Box sx={{ mt: 1.5 }}>
-          <Typography variant="caption" sx={{ color: "text.secondary" }}>
-            Active filters: {activeFiltersCount} {loading ? " | Loading…" : ""}
-          </Typography>
-        </Box>
-      </Box>
-
-      {/* Optional: more detailed debug view (can remove later) */}
-      <Box sx={{ px: 2, py: 1 }}>
-        <Typography variant="subtitle2">Debug: selected filters</Typography>
-        <Typography
-          variant="caption"
-          component="pre"
-          sx={{
-            maxHeight: 140,
-            overflow: "auto",
-            bgcolor: "#fafafa",
-            p: 1,
-            borderRadius: 1,
-            border: "1px solid #eee",
-          }}
-        >
-          {JSON.stringify(selected, null, 2)}
-        </Typography>
-        <Divider sx={{ mt: 1.5 }} />
       </Box>
 
       {err && (
