@@ -568,9 +568,6 @@ export default function Analytics() {
               ),
             }}
           />
-          <Typography variant="caption" sx={{ color: "text.secondary", minWidth: 120, textAlign: "right" }}>
-            Active filters: {activeFiltersCount} {loading ? " | Loading…" : ""}
-          </Typography>
         </Stack>
         <Stack
           direction={{ xs: "column", md: "row" }}
