@@ -162,6 +162,56 @@ export default function Analytics() {
 
   const [search, setSearch] = useState("");
 
+  const filteredBoroughs = useMemo(
+    () =>
+      !search.trim()
+        ? boroughs
+        : boroughs.filter((b) =>
+            String(b).toLowerCase().includes(search.trim().toLowerCase())
+          ),
+    [boroughs, search]
+  );
+
+  const filteredYears = useMemo(
+    () =>
+      !search.trim()
+        ? years
+        : years.filter((y) =>
+            String(y).toLowerCase().includes(search.trim().toLowerCase())
+          ),
+    [years, search]
+  );
+
+  const filteredVehicleTypes = useMemo(
+    () =>
+      !search.trim()
+        ? vehicleTypes
+        : vehicleTypes.filter((v) =>
+            String(v).toLowerCase().includes(search.trim().toLowerCase())
+          ),
+    [vehicleTypes, search]
+  );
+
+  const filteredFactors = useMemo(
+    () =>
+      !search.trim()
+        ? factors
+        : factors.filter((f) =>
+            String(f).toLowerCase().includes(search.trim().toLowerCase())
+          ),
+    [factors, search]
+  );
+
+  const filteredInjuryTypes = useMemo(
+    () =>
+      !search.trim()
+        ? injuryTypes
+        : injuryTypes.filter((i) =>
+            String(i).toLowerCase().includes(search.trim().toLowerCase())
+          ),
+    [injuryTypes, search]
+  );
+
   // Convert UI selections -> backend filters
   const filters = useMemo(() => {
     const f = buildFilters(selected);
@@ -501,7 +551,7 @@ export default function Analytics() {
           </Box>
           <TextField
             size="small"
-            placeholder="Search (coming soon)"
+            placeholder="Search within filter options..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             sx={{
@@ -516,7 +566,6 @@ export default function Analytics() {
                   <SearchIcon fontSize="small" sx={{ color: "text.secondary" }} />
                 </InputAdornment>
               ),
-              readOnly: true,
             }}
           />
           <Typography variant="caption" sx={{ color: "text.secondary", minWidth: 120, textAlign: "right" }}>
@@ -532,31 +581,31 @@ export default function Analytics() {
             label="Borough"
             value={selected.borough}
             onChange={v => setSelected(s => ({ ...s, borough: v }))}
-            options={boroughs}
+            options={filteredBoroughs}
           />
           <MultiSelect
             label="Year"
             value={selected.year}
             onChange={v => setSelected(s => ({ ...s, year: v }))}
-            options={years}
+            options={filteredYears}
           />
           <MultiSelect
             label="Vehicle Type"
             value={selected.vehicle_type}
             onChange={v => setSelected(s => ({ ...s, vehicle_type: v }))}
-            options={vehicleTypes}
+            options={filteredVehicleTypes}
           />
           <MultiSelect
             label="Contributing Factor"
             value={selected.factor}
             onChange={v => setSelected(s => ({ ...s, factor: v }))}
-            options={factors}
+            options={filteredFactors}
           />
           <MultiSelect
             label="Injury Type"
             value={selected.bodily_injury}
             onChange={v => setSelected(s => ({ ...s, bodily_injury: v }))}
-            options={injuryTypes}
+            options={filteredInjuryTypes}
           />
           <Tooltip title="Clear all filters">
             <span>
