@@ -192,32 +192,43 @@ export default function Home() {
             </Grid>
           </Grid>
 
-          <Button
-            variant="contained"
-            size="large"
-            onClick={() => navigate("/analytics")}
-          >
-            View Analytics
-          </Button>
           <Box
+            sx={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 2,
+              mt: 1,
+            }}
+          >
+            <Button
+              variant="contained"
+              size="large"
+              onClick={() => navigate("/analytics")}
+              sx={{ borderRadius: 3, px: 3 }}
+            >
+              View Analytics
+            </Button>
+            <Button
+              variant="outlined"
+              color="inherit"
+              size="large"
+              component={RouterLink}
+              to="/map"
               sx={{
-                height: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                borderRadius: 3,
+                px: 3,
+                bgcolor: "rgba(0,0,0,0.35)",
+                borderColor: "rgba(255,255,255,0.7)",
+                "&:hover": {
+                  bgcolor: "rgba(0,0,0,0.55)",
+                  borderColor: "white",
+                },
               }}
             >
-              <Button
-                variant="contained"
-                color="primary"
-                size="large"
-                component={RouterLink}
-                to="/map"
-                sx={{ borderRadius: 3, px: 3 }}
-              >
-                View Accident Map
-              </Button>
-            </Box>
+              View Accident Map
+            </Button>
+          </Box>
         </Container>
       </Box>
     </>
