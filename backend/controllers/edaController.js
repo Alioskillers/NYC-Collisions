@@ -15,6 +15,7 @@ const toNumber = (v) => (Number.isFinite(v) ? v : null);
 // Values we want to ignore in ALL charts & filters
 const EXCLUDED_CATEGORIES = new Set([
   'unknown',
+  'unsspecified',
   'unspecified',
   'does not apply',
   'does not apply/unknown',
@@ -34,48 +35,184 @@ function isExcludedCategoryValue(v) {
   return EXCLUDED_CATEGORIES.has(norm);
 }
 
-function parseHourFromCrashTime(rawTime) {
-  if (!rawTime) return null;
+/**
+ * CRASH_DATE / CRASH_TIME helpers
+ */
 
+// Get CRASH_DATE from record in whatever key exists
+function getRawCrashDate(record) {
+  return (
+    record['CRASH_DATE'] ||
+    record['crash_date'] ||
+    record['CRASH DATE'] ||
+    record['Crash Date'] ||
+    record.date ||
+    record['DATE']
+  );
+}
+
+// Get CRASH TIME field if the dataset ever has it
+function getRawCrashTime(record) {
+  return (
+    record['CRASH TIME'] ||
+    record['crash_time'] ||
+    record['CRASH_TIME'] ||
+    record['Crash Time'] ||
+    record.time ||
+    record['TIME']
+  );
+}
+
+// Parse hour from a time string like "13:45", "07:00", "9:30", "02:00:00"
+function parseHourFromTimeString(rawTime) {
+  if (!rawTime) return null;
   const s = String(rawTime).trim();
-  const m = /^(\d{1,2}):(\d{2})/.exec(s);
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?/.exec(s);
   if (!m) return null;
 
   const hour = Number(m[1]);
   if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
-
   return hour;
 }
 
+// Derive HOUR from record.
+// 1) Prefer CRASH TIME if present.
+// 2) Else, try to read hour from CRASH_DATE if it contains a time portion.
+let deriveHourDebugCount = 0;
 function deriveHourFromRecord(r) {
-  const rawTime =
-    r['CRASH TIME'] ||
-    r['crash_time'] ||
-    r['CRASH_TIME'] ||
-    r['Crash Time'] ||
-    r.time ||
-    r['TIME'];
+  const rawTime = getRawCrashTime(r);
 
-  return parseHourFromCrashTime(rawTime);
-}
+  // --- CASE 1: explicit CRASH TIME column ---
+  if (rawTime) {
+    const h = parseHourFromTimeString(rawTime);
+    if (deriveHourDebugCount < 10) {
+      console.log(
+        '[deriveHourFromRecord] from CRASH_TIME =',
+        rawTime,
+        '-> hour =',
+        h
+      );
+      deriveHourDebugCount++;
+    }
+    if (h !== null) return h;
+  }
 
-function deriveYearFromRecord(r) {
-  const rawDate =
-    r['CRASH DATE'] ||
-    r['crash_date'] ||
-    r['CRASH_DATE'] ||
-    r['Crash Date'] ||
-    r.date ||
-    r['DATE'];
+  // --- CASE 2: derive from CRASH_DATE if it has time ---
+  const rawDate = getRawCrashDate(r);
+  if (!rawDate) {
+    if (deriveHourDebugCount < 10) {
+      console.log('[deriveHourFromRecord] No CRASH_DATE or CRASH_TIME in record');
+      deriveHourDebugCount++;
+    }
+    return null;
+  }
 
-  if (!rawDate) return null;
+  // If it's already a Date object
+  if (rawDate instanceof Date && !isNaN(rawDate)) {
+    const h = rawDate.getHours();
+    if (deriveHourDebugCount < 10) {
+      console.log(
+        '[deriveHourFromRecord] Date object',
+        rawDate.toString(),
+        '-> hour =',
+        h
+      );
+      deriveHourDebugCount++;
+    }
+    return Number.isFinite(h) ? h : null;
+  }
 
   const s = String(rawDate).trim();
-  // works for "10/26/2019" or "2019-10-26" etc: take last 4 digits
-  const m = /(\d{4})\D*$/.exec(s);
-  if (!m) return null;
 
-  return m[1]; // keep as string (e.g. "2019")
+  // ISO format: 2019-10-26T14:32:00.000Z
+  const isoMatch = /T(\d{2}):(\d{2})/.exec(s);
+  if (isoMatch) {
+    const h = Number(isoMatch[1]);
+    if (deriveHourDebugCount < 10) {
+      console.log(
+        '[deriveHourFromRecord] ISO date string',
+        s,
+        '-> hour =',
+        h
+      );
+      deriveHourDebugCount++;
+    }
+    if (h >= 0 && h <= 23) return h;
+  }
+
+  // JS Date string: "Sat Oct 26 2019 02:00:00 GMT+0200 (Eastern European Standard Time)"
+  const dateStrMatch = /\s(\d{1,2}):(\d{2}):(\d{2})\s/.exec(s);
+  if (dateStrMatch) {
+    const h = Number(dateStrMatch[1]);
+    if (deriveHourDebugCount < 10) {
+      console.log(
+        '[deriveHourFromRecord] Date.toString() string',
+        s,
+        '-> hour =',
+        h
+      );
+      deriveHourDebugCount++;
+    }
+    if (h >= 0 && h <= 23) return h;
+  }
+
+  // "10/26/2019 13:45"
+  const parts = s.split(/\s+/);
+  if (parts.length >= 2) {
+    const h2 = parseHourFromTimeString(parts[1]);
+    if (deriveHourDebugCount < 10) {
+      console.log(
+        '[deriveHourFromRecord] split on space: date=',
+        parts[0],
+        'time=',
+        parts[1],
+        '-> hour =',
+        h2
+      );
+      deriveHourDebugCount++;
+    }
+    if (h2 !== null) return h2;
+  }
+
+  if (deriveHourDebugCount < 10) {
+    console.log('[deriveHourFromRecord] FAILED to parse hour from', rawDate);
+    deriveHourDebugCount++;
+  }
+  return null;
+}
+
+// Derive YEAR from CRASH_DATE
+// Derive YEAR from CRASH_DATE
+let deriveYearDebugCount = 0;
+function deriveYearFromRecord(r) {
+  const rawDate = getRawCrashDate(r);
+  if (!rawDate) return null;
+
+  // If it's already a Date object, just read the year
+  if (rawDate instanceof Date && !isNaN(rawDate)) {
+    const yy = rawDate.getFullYear();
+    return String(yy);
+  }
+
+  const s = String(rawDate).trim();
+
+  // Generic: take the FIRST 4-digit year that looks like 19xx or 20xx,
+  // not the last 4 digits (to avoid picking "0200" from "GMT+0200").
+  const m = /(19|20)\d{2}/.exec(s);
+  if (m) {
+    const year = m[0];
+    if (deriveYearDebugCount < 10) {
+      console.log('[deriveYearFromRecord] parsed year', year, 'from', s);
+      deriveYearDebugCount++;
+    }
+    return year;
+  }
+
+  if (deriveYearDebugCount < 10) {
+    console.log('[deriveYearFromRecord] could NOT parse year from:', rawDate);
+    deriveYearDebugCount++;
+  }
+  return null;
 }
 
 /**
@@ -130,7 +267,7 @@ const getFieldValues = (record, col) => {
     return values;
   }
 
-  // virtual year from CRASH DATE
+  // virtual year from CRASH_DATE
   if (col === 'year') {
     const y = deriveYearFromRecord(record);
     return y ? [String(y)] : [];
@@ -144,6 +281,7 @@ const getFieldValues = (record, col) => {
  * Global filter matcher with AND / OR logic
  * logic: 'AND' (default) or 'OR'
  */
+let recordFilterDebugCount = 0;
 function recordMatchesFilters(record, filters, logic = 'AND') {
   if (!filters || filters.length === 0) return true;
 
@@ -156,7 +294,6 @@ function recordMatchesFilters(record, filters, logic = 'AND') {
     const op = (f.op || 'eq').toLowerCase();
     const val = f.val;
 
-    // Normalize and exclude bad categories
     const rawValues = getFieldValues(record, col);
     const values = rawValues
       .map((v) => normalizeCategoryValue(v))
@@ -169,7 +306,20 @@ function recordMatchesFilters(record, filters, logic = 'AND') {
       const allowedSet = new Set(
         allowed.map((v) => normalizeCategoryValue(v))
       );
-      return values.some((v) => allowedSet.has(v));
+      const match = values.some((v) => allowedSet.has(v));
+
+      if (recordFilterDebugCount < 20 && col === 'year') {
+        console.log(
+          '[recordMatchesFilters][year] values=',
+          values,
+          'allowed=',
+          [...allowedSet],
+          'match=',
+          match
+        );
+      }
+
+      return match;
     }
 
     if (op === 'contains') {
@@ -190,19 +340,25 @@ function recordMatchesFilters(record, filters, logic = 'AND') {
     return values.some((v) => v === target);
   };
 
-  if (isAnd) {
-    // record must satisfy ALL filters
-    for (const f of filters) {
-      if (!matchesOneFilter(f)) return false;
-    }
-    return true;
-  } else {
-    // record must satisfy AT LEAST ONE filter
-    for (const f of filters) {
-      if (matchesOneFilter(f)) return true;
-    }
-    return false;
+  const result = isAnd
+    ? filters.every((f) => matchesOneFilter(f))
+    : filters.some((f) => matchesOneFilter(f));
+
+  if (recordFilterDebugCount < 20 && filters.length > 0) {
+    console.log(
+      '[recordMatchesFilters] logic=',
+      logic,
+      '| filters=',
+      JSON.stringify(filters),
+      '| sample crash_date=',
+      getRawCrashDate(record),
+      '| result=',
+      result
+    );
+    recordFilterDebugCount++;
   }
+
+  return result;
 }
 
 /** ---- DISTINCT VALUES (for filters dropdowns) ----
@@ -212,6 +368,8 @@ async function distinctValues(req, res) {
   const { crashes, persons } = getData();
   const col = req.query.col;
   const from = (req.query.from || 'crashes').toLowerCase();
+
+  console.log('[distinctValues] col=', col, 'from=', from);
 
   const src = from === 'persons' ? persons : crashes;
   const set = new Set();
@@ -225,6 +383,12 @@ async function distinctValues(req, res) {
   }
 
   const values = Array.from(set).sort((a, b) => a.localeCompare(b));
+  console.log(
+    '[distinctValues] total distinct values for',
+    col,
+    ':',
+    values.length
+  );
   res.json({ col, from, values });
 }
 
@@ -239,17 +403,42 @@ async function lineByTime(req, res) {
   const filters = parseFilters(req.query.filters);
   const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
+  console.log(
+    '[lineByTime] date_col=',
+    dateCol,
+    'freq=',
+    freq,
+    'logic=',
+    logic,
+    'filters=',
+    filters
+  );
+
   const bucketFn = freq === 'Y' ? yBucket : monthKey;
   const buckets = new Map();
 
+  let processed = 0;
+  let kept = 0;
+
   for (const c of crashes) {
+    processed++;
     if (!recordMatchesFilters(c, filters, logic)) continue;
-    const d = c[dateCol];
+    const d = c[dateCol] || getRawCrashDate(c);
     if (!d) continue;
     const key = bucketFn(d);
     if (!key) continue;
+    kept++;
     buckets.set(key, (buckets.get(key) || 0) + 1);
   }
+
+  console.log(
+    '[lineByTime] processed=',
+    processed,
+    'kept=',
+    kept,
+    'buckets=',
+    buckets.size
+  );
 
   const x = Array.from(buckets.keys()).sort();
   const y = x.map((k) => buckets.get(k) || 0);
@@ -268,6 +457,8 @@ async function barCounts(req, res) {
 
   const filters = parseFilters(req.query.filters);
   const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
+
+  console.log('[barCounts] cat=', cat, 'top=', top, 'logic=', logic, 'filters=', filters);
 
   let counts;
 
@@ -323,6 +514,8 @@ async function barCounts(req, res) {
   const x = data.map((d) => d.category);
   const y = data.map((d) => d.count);
 
+  console.log('[barCounts] data length=', data.length);
+
   res.json({ x, y, data });
 }
 
@@ -330,11 +523,13 @@ async function barCounts(req, res) {
  * /api/eda/pie?cat=bodily_injury&top=8&logic=AND|OR
  */
 async function pieCounts(req, res) {
+  console.log('[pieCounts] query=', req.query);
   const _req = { query: req.query };
   const _res = { json(payload) { this.payload = payload; } };
   await barCounts(_req, _res);
 
-  const { x, y, data } = _res.payload;
+  const { x, y, data } = _res.payload || { x: [], y: [], data: [] };
+  console.log('[pieCounts] labels=', x.length, 'values=', y.length);
   res.json({ labels: x, values: y, data });
 }
 
@@ -351,6 +546,8 @@ async function scatterXY(req, res) {
   const filters = parseFilters(req.query.filters);
   const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
+  console.log('[scatterXY] x=', xKey, 'y=', yKey, 'from=', from, 'limit=', limit, 'logic=', logic, 'filters=', filters);
+
   const src = from === 'persons' ? persons : crashes;
 
   const num = (v) => {
@@ -361,10 +558,33 @@ async function scatterXY(req, res) {
   const inNYCLon = (v) => v >= -75 && v <= -72;
 
   const pts = [];
+  let processed = 0;
+  let kept = 0;
+
   for (const r of src) {
+    processed++;
     if (!recordMatchesFilters(r, filters, logic)) continue;
-    let xv = num(r[xKey]);
-    let yv = num(r[yKey]);
+
+    let xv;
+    if (xKey === 'hour') {
+      xv = deriveHourFromRecord(r);
+    } else if (xKey === 'year') {
+      const y = deriveYearFromRecord(r);
+      xv = y ? Number(y) : null;
+    } else {
+      xv = num(r[xKey]);
+    }
+
+    let yv;
+    if (yKey === 'hour') {
+      yv = deriveHourFromRecord(r);
+    } else if (yKey === 'year') {
+      const y = deriveYearFromRecord(r);
+      yv = y ? Number(y) : null;
+    } else {
+      yv = num(r[yKey]);
+    }
+
     if (xv === null || yv === null) continue;
 
     if (xKey === 'latitude'   && !inNYCLat(xv)) continue;
@@ -373,12 +593,18 @@ async function scatterXY(req, res) {
     if (yKey === 'longitude'  && !inNYCLon(yv)) continue;
 
     if ((xKey === 'latitude' || xKey === 'longitude') && xv === 0) continue;
+
+    kept++;
     pts.push([xv, yv]);
   }
+
+  console.log('[scatterXY] processed=', processed, 'kept=', kept, 'pts before sample=', pts.length);
 
   const sampled = sampleArray(pts, limit);
   const x = sampled.map((p) => p[0]);
   const y = sampled.map((p) => p[1]);
+
+  console.log('[scatterXY] returning points=', x.length);
 
   res.json({ x, y });
 }
@@ -396,11 +622,17 @@ async function boxSummary(req, res) {
   const filters = parseFilters(req.query.filters);
   const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
+  console.log('[boxSummary] col=', col, 'by=', by, 'from=', from, 'logic=', logic, 'filters=', filters);
+
   const src = from === 'crashes' ? crashes : persons;
   const groups = new Map();
   const maxPerGroup = 3000;
 
+  let processed = 0;
+  let kept = 0;
+
   for (const r of src) {
+    processed++;
     if (!r) continue;
     if (!recordMatchesFilters(r, filters, logic)) continue;
 
@@ -412,15 +644,21 @@ async function boxSummary(req, res) {
     let v;
     if (col === 'hour') {
       v = deriveHourFromRecord(r);
+    } else if (col === 'year') {
+      const yy = deriveYearFromRecord(r);
+      v = yy ? Number(yy) : null;
     } else {
       v = toNumber(Number(r[col]));
     }
 
     if (!notNull(v)) continue;
 
+    kept++;
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(v);
   }
+
+  console.log('[boxSummary] processed=', processed, 'kept numeric=', kept, 'groups=', groups.size);
 
   const series = Array.from(groups.entries())
     .map(([name, vals]) => ({ name, y: sampleArray(vals, maxPerGroup) }))
@@ -435,6 +673,8 @@ async function boxSummary(req, res) {
   };
 
   const stats = series.map((s) => ({ name: s.name, ...describe(s.y) }));
+
+  console.log('[boxSummary] series count=', series.length);
 
   res.json({ series, groups: stats });
 }
@@ -452,23 +692,42 @@ async function histogram(req, res) {
   const filters = parseFilters(req.query.filters);
   const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
+  console.log('[histogram] col=', col, 'from=', from, 'bins=', bins, 'logic=', logic, 'filters=', filters);
+
   const src = from === 'persons' ? persons : crashes;
   const values = [];
 
+  let processed = 0;
+  let kept = 0;
+
   for (const r of src) {
+    processed++;
     if (!r) continue;
     if (!recordMatchesFilters(r, filters, logic)) continue;
 
     let v;
     if (col === 'hour') {
       v = deriveHourFromRecord(r);
+    } else if (col === 'year') {
+      const yy = deriveYearFromRecord(r);
+      v = yy ? Number(yy) : null;
     } else {
       v = toNumber(Number(r[col]));
     }
 
     if (!notNull(v)) continue;
+    kept++;
     values.push(v);
   }
+
+  console.log(
+    '[histogram] processed=',
+    processed,
+    'kept numeric=',
+    kept,
+    'values length=',
+    values.length
+  );
 
   res.json({ values, bins });
 }
@@ -486,14 +745,38 @@ async function corrMatrix(req, res) {
   const filters = parseFilters(req.query.filters);
   const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
+  console.log('[corrMatrix] cols=', cols, 'logic=', logic, 'filters=', filters);
+
   if (cols.length < 2) return res.json({ z: [], x: cols, y: cols });
 
   const rows = [];
+  let processed = 0;
+  let kept = 0;
+
   for (const c of crashes) {
+    processed++;
     if (!recordMatchesFilters(c, filters, logic)) continue;
-    const row = cols.map((k) => toNumber(Number(c[k])));
-    if (row.every(notNull)) rows.push(row);
+
+    const row = cols.map((k) => {
+      if (k === 'hour') {
+        const h = deriveHourFromRecord(c);
+        return h == null ? null : Number(h);
+      }
+      if (k === 'year') {
+        const yy = deriveYearFromRecord(c);
+        return yy == null ? null : Number(yy);
+      }
+      return toNumber(Number(c[k]));
+    });
+
+    if (row.every(notNull)) {
+      kept++;
+      rows.push(row);
+    }
   }
+
+  console.log('[corrMatrix] processed=', processed, 'kept rows=', kept);
+
   if (rows.length === 0) return res.json({ z: [], x: cols, y: cols });
 
   const n = rows.length;
@@ -518,6 +801,8 @@ async function corrMatrix(req, res) {
       z[b][a] = r;
     }
   }
+
+  console.log('[corrMatrix] finished corr matrix, size=', m, 'x', m);
 
   res.json({ z, x: cols, y: cols });
 }

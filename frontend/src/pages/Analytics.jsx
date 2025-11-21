@@ -497,19 +497,23 @@ export default function Analytics() {
   };
 
   return (
-    <Container maxWidth={false} sx={{ py: 0, px: 0 }}>
+    <Container maxWidth={false} sx={{ px: 0, pt: '10px', pb: '10px' }}>
       {/* Filters toolbar */}
       <Box
         sx={{
           px: 2,
-          py: 1.5,
+          pt: "10px",
+          pb: "10px",
+          mt: "10px",
+          mb: "10px",
           borderBottom: 1,
           borderColor: "divider",
           position: "sticky",
-          top: 0,
+          top: "10px",
           zIndex: 1,
           bgcolor: "background.paper",
           backdropFilter: "blur(10px)",
+          borderRadius: 2,
         }}
       >
         {/* Top row: title + status */}
@@ -521,17 +525,6 @@ export default function Analytics() {
         >
           <Typography variant="h6" fontWeight={600} sx={{ lineHeight: 1.2 }}>
             NYC Collision Analytics
-          </Typography>
-
-          <Typography
-            variant="caption"
-            sx={{
-              color: "text.secondary",
-              textAlign: { xs: "left", md: "right" },
-            }}
-          >
-            Active filters: {activeFiltersCount}
-            {loading ? " | Generating report…" : ""}
           </Typography>
         </Stack>
 
