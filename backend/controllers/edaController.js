@@ -289,45 +289,67 @@ async function scatterXY(req, res) {
  */
 async function boxSummary(req, res) {
   const { crashes, persons } = getData();
-  const col = req.query.col || 'hour';
-  const by = req.query.by || 'bodily_injury';
-  const from = (req.query.from || 'persons').toLowerCase();
+
+  // FIX: support both ?cat= and ?by=
+  const by = req.query.cat || req.query.by || "bodily_injury";
+
+  const col = req.query.col || "hour";
+  const from = (req.query.from || "persons").toLowerCase();
 
   const filters = parseFilters(req.query.filters);
 
-  const src = from === 'crashes' ? crashes : persons;
+  const src = from === "crashes" ? crashes : persons;
   const groups = new Map();
 
   for (const r of src) {
     if (!recordMatchesFilters(r, filters)) continue;
 
-    const g = (r[by] ?? 'Unknown').toString().trim() || 'Unknown';
+    // FIX: proper category selection
+    const category =
+      (r[by] ?? "Unknown").toString().trim() === ""
+        ? "Unknown"
+        : r[by].toString().trim();
 
+    // numeric Y value
     let v;
-    if (col === 'hour') {
-      v = deriveHourFromRecord(r);
+    if (col === "hour") {
+      v = deriveHourFromRecord(r); // you already wrote this
     } else {
       v = toNumber(Number(r[col]));
     }
 
     if (!notNull(v)) continue;
 
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(v);
+    // push value
+    if (!groups.has(category)) groups.set(category, []);
+    groups.get(category).push(v);
   }
 
+  // sampling (unchanged)
   const maxPerGroup = 3000;
   const series = Array.from(groups.entries())
-    .map(([name, vals]) => ({ name, y: sampleArray(vals, maxPerGroup) }))
+    .map(([name, vals]) => ({
+      name,
+      y: sampleArray(vals, maxPerGroup),
+    }))
     .filter((s) => s.y.length > 0)
     .sort((a, b) => b.y.length - a.y.length);
 
+  // descriptive stats (unchanged)
   const describe = (arr) => {
     const a = [...arr].sort((p, q) => p - q);
     const n = a.length;
     const q = (p) => a[Math.floor((p / 100) * (n - 1))];
-    return { n, min: a[0], q1: q(25), median: q(50), q3: q(75), max: a[n - 1] };
+    return {
+      n,
+      min: a[0],
+      q1: q(25),
+      median: q(50),
+      q3: q(75),
+      max: a[n - 1],
+    };
   };
+
   const stats = series.map((s) => ({ name: s.name, ...describe(s.y) }));
 
   res.json({ series, groups: stats });
