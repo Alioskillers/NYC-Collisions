@@ -205,3 +205,238 @@ CRASH_COL_VARIANTS = {
     "NUM_PERSONS_INJURED": ["NUMBER_OF_PERSONS_INJURED", "NUMBER OF PERSONS INJURED", "PERSONS_INJURED"],
     "NUM_PERSONS_KILLED":  ["NUMBER_OF_PERSONS_KILLED",  "NUMBER OF PERSONS KILLED",  "PERSONS_KILLED"]
 }
+
+#  Chunked cleaning of crashes (write cleaned_crashes.csv)
+#  drop rows missing essential fields, filter bbox, dedupe by COLLISION_ID
+print("STEP 1: Chunked cleaning of crashes ->", CLEANED_CRASHES_PATH)
+seen_collision_ids = set()
+first_chunk = True
+total_read = 0
+total_kept = 0
+total_dropped_missing_ess = 0
+total_outside_bbox = 0
+total_duplicates = 0
+
+crash_reader = pd.read_csv(CRASHES_URL, low_memory=False, chunksize=CRASH_CHUNKSIZE)
+
+for chunk in tqdm(crash_reader, desc="Reading crashes (chunks)"):
+    total_read += len(chunk)
+    # canonicalize column names 
+    chunk, rename_map = detect_and_rename_columns(chunk, CRASH_COL_VARIANTS)
+
+    # Ensure canonical columns exist as columns in chunk 
+    # Coerce COLLISION_ID numeric if present
+    if "COLLISION_ID" in chunk.columns:
+        chunk["COLLISION_ID"] = pd.to_numeric(chunk["COLLISION_ID"], errors="coerce")
+
+    # Parse CRASH_DATE if present
+    if "CRASH_DATE" in chunk.columns:
+        chunk["CRASH_DATE"] = pd.to_datetime(chunk["CRASH_DATE"], errors="coerce", infer_datetime_format=True)
+
+    # Parse CRASH_TIME flexibly if present 
+    if "CRASH_TIME" in chunk.columns:
+        # attempt parse, then fallback to HH:MM extraction if many failures
+        chunk["CRASH_TIME"] = pd.to_datetime(chunk["CRASH_TIME"], errors="coerce").dt.time
+        if chunk["CRASH_TIME"].isna().mean() > 0.25:
+            s = chunk["CRASH_TIME"].astype(str).str.extract(r'(\d{1,2}:\d{2})', expand=False)
+            chunk["CRASH_TIME"] = pd.to_datetime(s, format="%H:%M", errors="coerce").dt.time
+
+    # Clean LAT/LONG strings -> numeric
+    for c in ["LATITUDE", "LONGITUDE"]:
+        if c in chunk.columns:
+            chunk[c] = chunk[c].astype(str).str.replace(",", "").str.strip()
+            chunk[c] = pd.to_numeric(chunk[c], errors="coerce")
+
+    # Fill non-essential fields later; first apply 
+    essential_cols = [c for c in ["COLLISION_ID", "CRASH_DATE", "LATITUDE", "LONGITUDE", "BOROUGH"] if c in chunk.columns]
+
+    # Count missing essential
+    missing_ess_mask = chunk[essential_cols].isna().any(axis=1) if essential_cols else pd.Series(False, index=chunk.index)
+    dropped_missing_ess = missing_ess_mask.sum()
+    total_dropped_missing_ess += int(dropped_missing_ess)
+    if dropped_missing_ess > 0:
+        chunk = chunk[~missing_ess_mask]
+
+    # Geo bbox filter
+    before_geo = len(chunk)
+    if ("LATITUDE" in chunk.columns) and ("LONGITUDE" in chunk.columns):
+        geo_mask = chunk["LATITUDE"].between(MIN_LAT, MAX_LAT) & chunk["LONGITUDE"].between(MIN_LON, MAX_LON)
+        outside_bbox = (~geo_mask).sum()
+        total_outside_bbox += int(outside_bbox)
+        chunk = chunk[geo_mask]
+
+    # Deduplicate by COLLISION_ID using seen set 
+    if "COLLISION_ID" in chunk.columns:
+        # identify duplicates within this chunk and across previously seen ids
+        mask_seen = chunk["COLLISION_ID"].isin(seen_collision_ids)
+        total_duplicates += int(mask_seen.sum())
+        # remove those already seen
+        if mask_seen.any():
+            chunk = chunk[~mask_seen]
+        # now update seen set with remaining collision ids
+        seen_collision_ids.update(chunk["COLLISION_ID"].dropna().unique().tolist())
+
+    # Impute non-essential numeric injury/fatality cols -> 0 if present
+    inj_cols_present = [c for c in ["NUM_PERSONS_INJURED", "NUM_PERSONS_KILLED",
+                                    "NUMBER_OF_PEDESTRIANS_INJURED","NUMBER_OF_PEDESTRIANS_KILLED",
+                                    "NUMBER_OF_CYCLIST_INJURED","NUMBER_OF_CYCLIST_KILLED",
+                                    "NUMBER_OF_MOTORIST_INJURED","NUMBER_OF_MOTORIST_KILLED"] if c in chunk.columns]
+    if inj_cols_present:
+        chunk[inj_cols_present] = chunk[inj_cols_present].fillna(0)
+
+    # Impute textual fields (contributing factors, vehicle types) with "Unknown" to preserve records
+    text_factor_cols = [c for c in chunk.columns if "CONTRIBUTING" in c.upper() or "VEHICLE_TYPE" in c.upper() or "VEHICLE TYPE" in c.upper()]
+    if text_factor_cols:
+        chunk[text_factor_cols] = chunk[text_factor_cols].fillna("Unknown")
+
+    # Optional text columns -> "Unknown"
+    optional_texts = [c for c in ["ZIP_CODE", "ZIP CODE", "ON_STREET_NAME", "ON_STREET NAME",
+                                  "OFF_STREET_NAME", "OFF_STREET NAME", "LOCATION"] if c in chunk.columns]
+    if optional_texts:
+        chunk[optional_texts] = chunk[optional_texts].fillna("Unknown")
+
+    # Append to cleaned file
+    if first_chunk:
+        chunk.to_csv(CLEANED_CRASHES_PATH, index=False, mode="w")
+        first_chunk = False
+    else:
+        chunk.to_csv(CLEANED_CRASHES_PATH, index=False, mode="a", header=False)
+
+    total_kept += len(chunk)
+
+print()
+print("Crashes read:", total_read)
+print("Kept after cleaning:", total_kept)
+print("Dropped missing essentials:", total_dropped_missing_ess)
+print("Dropped outside bbox:", total_outside_bbox)
+print("Dropped duplicates (seen):", total_duplicates)
+print("Cleaned crashes saved to:", CLEANED_CRASHES_PATH)
+print("Unique collisions kept (seen set size):", len(seen_collision_ids))
+
+# STEP 2: Clean persons table (we keep persons that have COLLISION_ID and PERSON_ID)
+print("\nSTEP 2: Cleaning persons table ->", CLEANED_PERSONS_PATH)
+ps_first = True
+ps_total_read = 0
+ps_kept = 0
+ps_dropped_missing_key = 0
+
+person_reader = pd.read_csv(PERSONS_URL, low_memory=False, chunksize=PERSON_CHUNKSIZE)
+# we'll canonicalize persons COLLISION_ID if necessary
+# detect collision id name variants from first chunk
+for chunk in tqdm(person_reader, desc="Reading persons (chunks)"):
+    ps_total_read += len(chunk)
+    # normalize column names -> try to find collision id variants
+    chunk_cols_norm = { norm_colname(c): c for c in chunk.columns }
+    # find collision id in persons
+    possible = ["COLLISION_ID", "COLLISION ID", "CRASH_ID", "CRASH ID", "UNIQUE_KEY", "UNIQUE KEY"]
+    found = None
+    for cand in possible:
+        n = norm_colname(cand)
+        if n in chunk_cols_norm:
+            found = chunk_cols_norm[n]
+            break
+    if found:
+        chunk = chunk.rename(columns={found: "COLLISION_ID"})
+    # ensure COLLISION_ID numeric
+    if "COLLISION_ID" in chunk.columns:
+        chunk["COLLISION_ID"] = pd.to_numeric(chunk["COLLISION_ID"], errors="coerce")
+
+    # ensure PERSON_ID numeric if present
+    if "PERSON_ID" in chunk.columns:
+        chunk["PERSON_ID"] = pd.to_numeric(chunk["PERSON_ID"], errors="coerce")
+
+    # drop rows missing essential join keys 
+    key_cols = ["COLLISION_ID"]
+    if "PERSON_ID" in chunk.columns:
+        key_cols.append("PERSON_ID")
+    missing_key_mask = chunk[key_cols].isna().any(axis=1)
+    ps_dropped_missing_key += int(missing_key_mask.sum())
+    if missing_key_mask.any():
+        chunk = chunk[~missing_key_mask]
+
+    # Deduplicate person-level rows by (COLLISION_ID, PERSON_ID) if both exist
+    if "PERSON_ID" in chunk.columns:
+        chunk = chunk.drop_duplicates(subset=["COLLISION_ID", "PERSON_ID"])
+    else:
+        chunk = chunk.drop_duplicates(subset=["COLLISION_ID"])
+
+    # This is safe because we will inner-join on collisions; keep only persons with collision in seen_collision_ids
+    if len(seen_collision_ids) > 0 and "COLLISION_ID" in chunk.columns:
+        before_filter = len(chunk)
+        chunk = chunk[chunk["COLLISION_ID"].isin(seen_collision_ids)]
+        ps_kept += len(chunk)
+    else:
+        ps_kept += len(chunk)
+
+    # append to file
+    if ps_first:
+        chunk.to_csv(CLEANED_PERSONS_PATH, index=False, mode="w")
+        ps_first = False
+    else:
+        chunk.to_csv(CLEANED_PERSONS_PATH, index=False, mode="a", header=False)
+
+print()
+print("Persons rows read:", ps_total_read)
+print("Persons kept (after filter):", ps_kept)
+print("Persons dropped missing key:", ps_dropped_missing_key)
+print("Cleaned persons saved to:", CLEANED_PERSONS_PATH)
+
+# STEP 3: Load cleaned files and perform inner join
+
+print("\nSTEP 3: Loading cleaned files and joining (inner) ...")
+# load cleaned crashes and persons
+df_cr = pd.read_csv(CLEANED_CRASHES_PATH, low_memory=False)
+df_ps = pd.read_csv(CLEANED_PERSONS_PATH, low_memory=False)
+print("Cleaned crashes shape:", df_cr.shape)
+print("Cleaned persons shape:", df_ps.shape)
+
+# Ensure COLLISION_ID numeric and dedupe just in case
+if "COLLISION_ID" in df_cr.columns:
+    df_cr["COLLISION_ID"] = pd.to_numeric(df_cr["COLLISION_ID"], errors="coerce").astype(int)
+if "COLLISION_ID" in df_ps.columns:
+    df_ps["COLLISION_ID"] = pd.to_numeric(df_ps["COLLISION_ID"], errors="coerce").astype(int)
+
+# Final inner join (keeps only collisions that have person records)
+df_joined = df_cr.merge(df_ps, on="COLLISION_ID", how="inner", suffixes=("_CRASH","_PERSON"))
+print("Joined shape:", df_joined.shape)
+
+# STEP 4: Post-join cleaning
+
+to_drop_post = []
+for c in ["LATITUDE_PERSON","LONGITUDE_PERSON","CRASH_DATE_PERSON","BOROUGH_PERSON"]:
+    if c in df_joined.columns:
+        to_drop_post.append(c)
+if to_drop_post:
+    df_joined = df_joined.drop(columns=to_drop_post)
+
+# ensure crash_date is datetime
+if "CRASH_DATE" in df_joined.columns:
+    df_joined["CRASH_DATE"] = pd.to_datetime(df_joined["CRASH_DATE"], errors="coerce")
+
+# Fill any remaining small missing numeric injury fields with 0
+num_cols = [c for c in df_joined.columns if c.upper().startswith("NUMBER_OF") or c.upper().startswith("NUM_")]
+if num_cols:
+    df_joined[num_cols] = df_joined[num_cols].fillna(0)
+
+# STEP 5: Save integrated dataset (compressed)
+print("\nSaving integrated dataset to:", INTEGRATED_OUT)
+df_joined.to_csv(INTEGRATED_OUT, index=False, compression="gzip")
+
+# Print final stats
+print("Final integrated shape:", df_joined.shape)
+print("File saved:", INTEGRATED_OUT)
+print("File size (MB):", os.path.getsize(INTEGRATED_OUT)/1024/1024)
+
+df_joined = df_crashes.merge(df_persons, on="COLLISION_ID", how="inner")
+
+print("Joined dataset shape:", df_joined.shape)
+df_joined.head()
+
+import pandas as pd
+
+df = pd.read_csv("/content/integrated.csv.gz", compression="gzip", low_memory=False)
+df.to_csv("/content/integrated.csv", index=False)
+print("Saved as /content/integrated.csv")
+
+from google.colab import files
+files.download("/content/integrated.csv")
