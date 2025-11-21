@@ -59,6 +59,25 @@ function deriveHourFromRecord(r) {
   return parseHourFromCrashTime(rawTime);
 }
 
+function deriveYearFromRecord(r) {
+  const rawDate =
+    r['CRASH DATE'] ||
+    r['crash_date'] ||
+    r['CRASH_DATE'] ||
+    r['Crash Date'] ||
+    r.date ||
+    r['DATE'];
+
+  if (!rawDate) return null;
+
+  const s = String(rawDate).trim();
+  // works for "10/26/2019" or "2019-10-26" etc: take last 4 digits
+  const m = /(\d{4})\D*$/.exec(s);
+  if (!m) return null;
+
+  return m[1]; // keep as string (e.g. "2019")
+}
+
 /**
  * Parse filters from query:
  *   filters=[{"col":"borough","op":"in","val":["Queens","Brooklyn"]}, ...]
@@ -109,6 +128,12 @@ const getFieldValues = (record, col) => {
       values.push(record.contributing_factor_vehicle_2);
     }
     return values;
+  }
+
+  // virtual year from CRASH DATE
+  if (col === 'year') {
+    const y = deriveYearFromRecord(record);
+    return y ? [String(y)] : [];
   }
 
   // Default: direct column access

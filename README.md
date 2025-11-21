@@ -15,6 +15,8 @@ We have deployed our website on AWS EC2 through PM2 for backend to be running an
 through scp command: 
 scp -i ../collisions.pem -r dist ec2-user@ec2-16-170-67-112.eu-north-1.compute.amazonaws.com:/home/ec2-user/NYC-Collisions/frontend/dist,
 
+Because Integrated.csv was cery huge we uploaded it into an S3 bucket and then copied it into the server to avoid latency.
+
 For acceesing the instance we used SSH client by genrating a private access key called collisions.pem using RSA cryptographic secure algrithom.
 please visit the link to access the website: http://16.170.67.112/
 

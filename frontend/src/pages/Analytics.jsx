@@ -89,8 +89,7 @@ function buildFilters(selected) {
   }
 
   if (selected?.year?.length) {
-    const rx = "^" + selected.year.map(String).join("|^");
-    out.push({ col: "crash_date", op: "contains", val: rx });
+    out.push({ col: "year", op: "in", val: selected.year});
   }
 
   return out;
@@ -653,7 +652,7 @@ export default function Analytics() {
 
       {figs.box && (
         <PlotCard
-          title="Box plot by body_injuries"
+          title="Box plot by body injuries"
           subtitle="Y: hour grouped by bodily injuries"
           data={figs.box.data}
           layout={figs.box.layout}
@@ -681,7 +680,7 @@ export default function Analytics() {
       {figs.line && (
         <PlotCard
           title="Monthly line chart"
-          subtitle="X: Month (crash_date), Y: count"
+          subtitle="X: Month (crash date), Y: count"
           data={figs.line.data}
           layout={figs.line.layout}
         />
@@ -690,7 +689,7 @@ export default function Analytics() {
       {figs.corr && (
         <PlotCard
           title="Correlation heatmap"
-          subtitle="Corr(latitude, hour, ...)"
+          subtitle="Correlation (latitude, hour)"
           data={figs.corr.data}
           layout={figs.corr.layout}
         />
