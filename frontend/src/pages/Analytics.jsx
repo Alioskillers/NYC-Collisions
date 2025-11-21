@@ -251,7 +251,7 @@ export default function Analytics() {
 
       const calls = await Promise.allSettled([
         withOpts("/api/eda/scatter?x=latitude&y=hour&limit=3000"),
-        withOpts("api/eda/box?col=hour&by=bodily_injury&from=crashes"),
+        withOpts("/api/eda/box?col=hour&cat=borough&from=crashes"),
         withOpts("/api/eda/hist?col=hour&from=crashes&bins=24"),
         withOpts("/api/eda/bar?cat=bodily_injury&top=12"),
         withOpts("/api/eda/line?date_col=crash_date&freq=M"),
