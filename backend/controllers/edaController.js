@@ -12,12 +12,32 @@ const {
 const notNull = (v) => v !== null && v !== undefined && v !== '';
 const toNumber = (v) => (Number.isFinite(v) ? v : null);
 
+// Values we want to ignore in ALL charts & filters
+const EXCLUDED_CATEGORIES = new Set([
+  'unknown',
+  'unspecified',
+  'does not apply',
+  'does not apply/unknown',
+  'not applicable',
+  'na',
+  'n/a',
+]);
+
+function normalizeCategoryValue(v) {
+  if (v == null) return '';
+  return String(v).trim();
+}
+
+function isExcludedCategoryValue(v) {
+  const norm = normalizeCategoryValue(v).toLowerCase();
+  if (!norm) return false;
+  return EXCLUDED_CATEGORIES.has(norm);
+}
+
 function parseHourFromCrashTime(rawTime) {
   if (!rawTime) return null;
 
   const s = String(rawTime).trim();
-
-  // Expect formats like "9:43", "09:43", "23:59"
   const m = /^(\d{1,2}):(\d{2})/.exec(s);
   if (!m) return null;
 
@@ -28,7 +48,6 @@ function parseHourFromCrashTime(rawTime) {
 }
 
 function deriveHourFromRecord(r) {
-  // Try CRASH TIME variants (depending on your CSV)
   const rawTime =
     r['CRASH TIME'] ||
     r['crash_time'] ||
@@ -40,11 +59,14 @@ function deriveHourFromRecord(r) {
   return parseHourFromCrashTime(rawTime);
 }
 
+/**
+ * Parse filters from query:
+ *   filters=[{"col":"borough","op":"in","val":["Queens","Brooklyn"]}, ...]
+ */
 const parseFilters = (raw) => {
   if (!raw) return [];
   try {
     if (Array.isArray(raw)) {
-      // In case Express gives multiple params, merge them
       const merged = [];
       for (const r of raw) {
         if (typeof r === 'string') merged.push(...JSON.parse(r));
@@ -62,9 +84,12 @@ const parseFilters = (raw) => {
   return [];
 };
 
+/**
+ * Virtual columns used by the UI
+ */
 const getFieldValues = (record, col) => {
   if (!record) return [];
-  // Virtual columns used by the UI
+
   if (col === 'vehicle_type') {
     return [
       record.vehicle_type_code1,
@@ -90,50 +115,96 @@ const getFieldValues = (record, col) => {
   return [record[col]];
 };
 
-const recordMatchesFilters = (record, filters) => {
+/**
+ * Global filter matcher with AND / OR logic
+ * logic: 'AND' (default) or 'OR'
+ */
+function recordMatchesFilters(record, filters, logic = 'AND') {
   if (!filters || filters.length === 0) return true;
 
-  for (const f of filters) {
-    if (!f || !f.col) continue;
+  const isAnd = String(logic).toUpperCase() !== 'OR';
+
+  const matchesOneFilter = (f) => {
+    if (!f || !f.col) return true; // ignore invalid filters
+
     const col = f.col;
     const op = (f.op || 'eq').toLowerCase();
     const val = f.val;
 
-    const values = getFieldValues(record, col).filter(notNull);
+    // Normalize and exclude bad categories
+    const rawValues = getFieldValues(record, col);
+    const values = rawValues
+      .map((v) => normalizeCategoryValue(v))
+      .filter((v) => notNull(v) && !isExcludedCategoryValue(v));
+
     if (values.length === 0) return false;
 
     if (op === 'in') {
       const allowed = Array.isArray(val) ? val : [val];
-      const set = new Set(allowed.map((v) => String(v)));
-      const ok = values.some((v) => set.has(String(v)));
-      if (!ok) return false;
-    } else if (op === 'contains') {
+      const allowedSet = new Set(
+        allowed.map((v) => normalizeCategoryValue(v))
+      );
+      return values.some((v) => allowedSet.has(v));
+    }
+
+    if (op === 'contains') {
       const pattern = String(val ?? '');
-      if (!pattern) continue;
+      if (!pattern) return true; // effectively no-op filter
       let re;
       try {
         re = new RegExp(pattern, 'i');
       } catch (e) {
-        // Fallback: escape regex
         const escaped = pattern.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
         re = new RegExp(escaped, 'i');
       }
-      const ok = values.some((v) => re.test(String(v)));
-      if (!ok) return false;
-    } else if (op === 'eq') {
-      const target = String(val);
-      const ok = values.some((v) => String(v) === target);
-      if (!ok) return false;
+      return values.some((v) => re.test(String(v)));
     }
+
+    // default: eq
+    const target = normalizeCategoryValue(val);
+    return values.some((v) => v === target);
+  };
+
+  if (isAnd) {
+    // record must satisfy ALL filters
+    for (const f of filters) {
+      if (!matchesOneFilter(f)) return false;
+    }
+    return true;
+  } else {
+    // record must satisfy AT LEAST ONE filter
+    for (const f of filters) {
+      if (matchesOneFilter(f)) return true;
+    }
+    return false;
+  }
+}
+
+/** ---- DISTINCT VALUES (for filters dropdowns) ----
+ * /api/eda/distinct?col=borough&from=crashes
+ */
+async function distinctValues(req, res) {
+  const { crashes, persons } = getData();
+  const col = req.query.col;
+  const from = (req.query.from || 'crashes').toLowerCase();
+
+  const src = from === 'persons' ? persons : crashes;
+  const set = new Set();
+
+  for (const r of src) {
+    if (!r) continue;
+    const raw = r[col];
+    const v = normalizeCategoryValue(raw);
+    if (!v || isExcludedCategoryValue(v)) continue;
+    set.add(v);
   }
 
-  return true;
-};
+  const values = Array.from(set).sort((a, b) => a.localeCompare(b));
+  res.json({ col, from, values });
+}
 
 /** ---- LINE (time series) ----
- * /api/eda/line?date_col=crash_date&freq=M|Y
- * returns:
- *   { x:[bucket], y:[count], points:[{x,y}] }
+ * /api/eda/line?date_col=crash_date&freq=M|Y&logic=AND|OR
  */
 async function lineByTime(req, res) {
   const { crashes } = getData();
@@ -141,12 +212,13 @@ async function lineByTime(req, res) {
   const freq = (req.query.freq || 'M').toUpperCase(); // 'M' or 'Y'
 
   const filters = parseFilters(req.query.filters);
+  const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
   const bucketFn = freq === 'Y' ? yBucket : monthKey;
   const buckets = new Map();
 
   for (const c of crashes) {
-    if (!recordMatchesFilters(c, filters)) continue;
+    if (!recordMatchesFilters(c, filters, logic)) continue;
     const d = c[dateCol];
     if (!d) continue;
     const key = bucketFn(d);
@@ -162,9 +234,7 @@ async function lineByTime(req, res) {
 }
 
 /** ---- BAR (top categories) ----
- * /api/eda/bar?cat=borough|vehicle_type|factor|bodily_injury&top=12
- * returns:
- *   { x:[category], y:[count], data:[{category,count}] }
+ * /api/eda/bar?cat=borough|vehicle_type|factor|bodily_injury&top=12&logic=AND|OR
  */
 async function barCounts(req, res) {
   const { crashes, persons } = getData();
@@ -172,43 +242,54 @@ async function barCounts(req, res) {
   const top = parseInt(req.query.top || '12', 10);
 
   const filters = parseFilters(req.query.filters);
+  const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
   let counts;
 
   if (cat === 'vehicle_type') {
     const vt = [];
     for (const c of crashes) {
-      if (!recordMatchesFilters(c, filters)) continue;
-      const v = [
+      if (!recordMatchesFilters(c, filters, logic)) continue;
+      const types = [
         c.vehicle_type_code1,
         c.vehicle_type_code2,
         c.vehicle_type_code_3,
         c.vehicle_type_code_4,
         c.vehicle_type_code_5,
-      ].filter(notNull);
-      vt.push(...v);
+      ];
+      for (const t of types) {
+        const v = normalizeCategoryValue(t);
+        if (!v || isExcludedCategoryValue(v)) continue;
+        vt.push(v);
+      }
     }
     counts = tally(vt);
   } else if (cat === 'factor') {
     const fac = [];
     for (const c of crashes) {
-      if (!recordMatchesFilters(c, filters)) continue;
-      if (notNull(c.contributing_factor_vehicle_1)) fac.push(c.contributing_factor_vehicle_1);
-      if (notNull(c.contributing_factor_vehicle_2)) fac.push(c.contributing_factor_vehicle_2);
+      if (!recordMatchesFilters(c, filters, logic)) continue;
+      const v1 = normalizeCategoryValue(c.contributing_factor_vehicle_1);
+      const v2 = normalizeCategoryValue(c.contributing_factor_vehicle_2);
+      if (v1 && !isExcludedCategoryValue(v1)) fac.push(v1);
+      if (v2 && !isExcludedCategoryValue(v2)) fac.push(v2);
     }
     counts = tally(fac);
   } else if (cat === 'bodily_injury') {
     const values = [];
     for (const p of persons) {
-      if (!recordMatchesFilters(p, filters)) continue;
-      values.push(p.bodily_injury);
+      if (!recordMatchesFilters(p, filters, logic)) continue;
+      const v = normalizeCategoryValue(p.bodily_injury);
+      if (!v || isExcludedCategoryValue(v)) continue;
+      values.push(v);
     }
     counts = tally(values);
   } else {
     const values = [];
     for (const c of crashes) {
-      if (!recordMatchesFilters(c, filters)) continue;
-      values.push(c[cat]);
+      if (!recordMatchesFilters(c, filters, logic)) continue;
+      const v = normalizeCategoryValue(c[cat]);
+      if (!v || isExcludedCategoryValue(v)) continue;
+      values.push(v);
     }
     counts = tally(values);
   }
@@ -221,12 +302,9 @@ async function barCounts(req, res) {
 }
 
 /** ---- PIE (reuses bar logic) ----
- * /api/eda/pie?cat=bodily_injury&top=8
- * returns:
- *   { labels:[...], values:[...], data:[{category,count}] }
+ * /api/eda/pie?cat=bodily_injury&top=8&logic=AND|OR
  */
 async function pieCounts(req, res) {
-  // reuse barCounts logic internally
   const _req = { query: req.query };
   const _res = { json(payload) { this.payload = payload; } };
   await barCounts(_req, _res);
@@ -236,8 +314,7 @@ async function pieCounts(req, res) {
 }
 
 /** ---- SCATTER ----
- * /api/eda/scatter?x=latitude&y=hour&limit=3000&from=crashes|persons
- * returns: { x:[...], y:[...] }
+ * /api/eda/scatter?x=latitude&y=hour&limit=3000&from=crashes|persons&logic=AND|OR
  */
 async function scatterXY(req, res) {
   const { crashes, persons } = getData();
@@ -247,6 +324,7 @@ async function scatterXY(req, res) {
   const from  = (req.query.from || 'crashes').toLowerCase();
 
   const filters = parseFilters(req.query.filters);
+  const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
   const src = from === 'persons' ? persons : crashes;
 
@@ -259,7 +337,7 @@ async function scatterXY(req, res) {
 
   const pts = [];
   for (const r of src) {
-    if (!recordMatchesFilters(r, filters)) continue;
+    if (!recordMatchesFilters(r, filters, logic)) continue;
     let xv = num(r[xKey]);
     let yv = num(r[yKey]);
     if (xv === null || yv === null) continue;
@@ -269,7 +347,6 @@ async function scatterXY(req, res) {
     if (yKey === 'latitude'   && !inNYCLat(yv)) continue;
     if (yKey === 'longitude'  && !inNYCLon(yv)) continue;
 
-    // treat latitude/longitude == 0 as missing
     if ((xKey === 'latitude' || xKey === 'longitude') && xv === 0) continue;
     pts.push([xv, yv]);
   }
@@ -282,33 +359,30 @@ async function scatterXY(req, res) {
 }
 
 /** ---- BOX PLOT ----
- * /api/eda/box?col=hour&by=bodily_injury&from=persons|crashes
- * returns:
- *   { series: [ { name, y:[values] }, ... ],
- *     groups: [{name, n, min, q1, median, q3, max}] }   // extra stats (optional for UI)
+ * /api/eda/box?col=hour&by=bodily_injury&from=persons|crashes&logic=AND|OR
  */
 async function boxSummary(req, res) {
   const { crashes, persons } = getData();
 
   const col = req.query.col || 'hour';
-  // support both ?cat= and ?by=
   const by = req.query.cat || req.query.by || 'bodily_injury';
   const from = (req.query.from || 'persons').toLowerCase();
 
   const filters = parseFilters(req.query.filters);
-  const src = from === 'crashes' ? crashes : persons;
+  const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
+  const src = from === 'crashes' ? crashes : persons;
   const groups = new Map();
   const maxPerGroup = 3000;
 
   for (const r of src) {
     if (!r) continue;
-    if (!recordMatchesFilters(r, filters)) continue;
+    if (!recordMatchesFilters(r, filters, logic)) continue;
 
-    // safe grouping value
     let rawGroup = r[by];
-    let g = rawGroup == null ? 'Unknown' : String(rawGroup).trim();
-    if (!g) g = 'Unknown';
+    let g = normalizeCategoryValue(rawGroup);
+
+    if (!g || isExcludedCategoryValue(g)) continue;
 
     let v;
     if (col === 'hour') {
@@ -341,54 +415,57 @@ async function boxSummary(req, res) {
 }
 
 /** ---- HISTOGRAM ----
- * /api/eda/hist?col=hour&bins=24&from=persons|crashes
- * returns:
- *   { values, bins }
+ * /api/eda/hist?col=hour&bins=24&from=persons|crashes&logic=AND|OR
  */
 async function histogram(req, res) {
   const { crashes, persons } = getData();
-  const col   = req.query.col || 'hour';
-  const bins  = Math.max(1, parseInt(req.query.bins || '24', 10));
-  const from  = (req.query.from || 'persons').toLowerCase();
+
+  const col = req.query.col || 'hour';
+  const from = (req.query.from || 'crashes').toLowerCase();
+  const bins = Number(req.query.bins) || 24;
 
   const filters = parseFilters(req.query.filters);
+  const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
-  const src = from === 'crashes' ? crashes : persons;
+  const src = from === 'persons' ? persons : crashes;
   const values = [];
 
   for (const r of src) {
-    if (!recordMatchesFilters(r, filters)) continue;
+    if (!r) continue;
+    if (!recordMatchesFilters(r, filters, logic)) continue;
 
     let v;
-
     if (col === 'hour') {
-      // get hour from CRASH TIME like "9:43"
       v = deriveHourFromRecord(r);
     } else {
-      v = Number(r[col]);
+      v = toNumber(Number(r[col]));
     }
 
-    if (Number.isFinite(v)) values.push(v);
+    if (!notNull(v)) continue;
+    values.push(v);
   }
 
   res.json({ values, bins });
 }
 
 /** ---- CORRELATION (heatmap) ----
- * /api/eda/corr?cols=latitude,hour,number_of_persons_injured
- * returns: { z:[[...]], x:[colnames], y:[colnames] }
+ * /api/eda/corr?cols=latitude,hour,number_of_persons_injured&logic=AND|OR
  */
 async function corrMatrix(req, res) {
   const { crashes } = getData();
-  const cols = (req.query.cols || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const cols = (req.query.cols || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   const filters = parseFilters(req.query.filters);
+  const logic = (req.query.logic || req.query.mode || 'AND').toUpperCase();
 
   if (cols.length < 2) return res.json({ z: [], x: cols, y: cols });
 
   const rows = [];
   for (const c of crashes) {
-    if (!recordMatchesFilters(c, filters)) continue;
+    if (!recordMatchesFilters(c, filters, logic)) continue;
     const row = cols.map((k) => toNumber(Number(c[k])));
     if (row.every(notNull)) rows.push(row);
   }
@@ -421,6 +498,7 @@ async function corrMatrix(req, res) {
 }
 
 module.exports = {
+  distinctValues,
   lineByTime,
   barCounts,
   pieCounts,
