@@ -4,6 +4,8 @@ Interactive analytics dashboard for exploring NYC motor vehicle collisions using
 
 The app focuses on exploratory data analysis (EDA): understanding when and where crashes happen, which vehicle types are involved, and how contributing factors and injuries are distributed.
 
+REMARK: We only used 10K values from the dataset because the dataset is huge and it will take a huge computaion to load every row before running.
+
 ⸻
 
 Deployment Overview:
