@@ -1,169 +1,12 @@
-NYC Collisions Analytics Dashboard
+# 🚗 NYC Collisions Analytics Dashboard
 
-Interactive analytics dashboard for exploring NYC motor vehicle collisions using a cleaned and sampled subset of the official NYC Open Data crashes & persons datasets.
+An interactive analytics dashboard for exploring NYC motor vehicle collisions using a cleaned and sampled subset of the official NYC Open Data **Crashes** and **Persons** datasets.
 
-The app focuses on exploratory data analysis (EDA): understanding when and where crashes happen, which vehicle types are involved, and how contributing factors and injuries are distributed.
-
-REMARK: We only used 10K values from the dataset because the dataset is huge and it will take a huge computaion to load every row before running.
-
-⸻
-
-Deployment Overview:
-
-We have deployed our website on AWS EC2 through PM2 for backend to be running and NGINX for frontend reverse proxy, Using Amazon Linux 2023 as an OS and github to clone and pull changes from the repository, we used the region EU-North-1a (stockolm) because its the most stable region after the recent incident od US-East, for building the frontend the EC2 instance type is t3.micro so building the frontend will be too heavy so we built the app locally and sent the dist folder 
-
-through scp command: 
-scp -i ../collisions.pem -r dist ec2-user@ec2-16-170-67-112.eu-north-1.compute.amazonaws.com:/home/ec2-user/NYC-Collisions/frontend/dist,
-
-Because Integrated.csv was cery huge we uploaded it into an S3 bucket and then copied it into the server to avoid latency.
-
-For acceesing the instance we used SSH client by genrating a private access key called collisions.pem using RSA cryptographic secure algrithom.
-please visit the link to access the website: http://16.170.67.112/
-
-Tech Stack
-	•	Frontend: React + Vite + Material UI + Plotly
-	•	Backend: Node.js + Express
-	•	Data Processing: Python / Pandas (offline, to create integrated CSV)
-	•	Data Source: NYC Open Data – Motor Vehicle Collisions (Crashes + Persons), sampled to 10,000 rows
-
-Main Features
-	•	Analytics page with multiple interactive charts:
-	•	Scatter: latitude vs hour
-	•	Box plots by bodily injury
-	•	Histogram of crash hour
-	•	Bar chart of injury categories
-	•	Monthly time-series line chart
-	•	Correlation heatmap
-	•	Pie chart of bodily injury share
-	•	Filter toolbar (top of Analytics page):
-	•	Filter by Borough, Year, Vehicle Type, Contributing Factor, Injury Type
-	•	Global AND/OR logic toggle for combining filters
-	•	“Generate Report” (apply filters) & “Reset” buttons
-	•	Search bar (above the filters):
-	•	Users can type queries like:
-             brooklyn 2019 taxi crashes
-        and the app automatically maps the words to filters.
-	•	Backend filter API:
-	•	Frontend builds a filter array and passes it to endpoints like /api/eda/*
-	•	Backend returns Plotly-compatible JSON that the frontend wraps and renders safely
-
-⸻
-
-Dataset & Data Processing
-
-We use an integrated CSV that merges crash-level info with person-level info:
-	•	Columns include:
-	•	CRASH DATE, CRASH TIME, CRASH_DATETIME
-	•	BOROUGH, ZIP CODE, LATITUDE, LONGITUDE
-	•	PERSON_TYPE, PERSON_INJURY, BODILY_INJURY
-	•	VEHICLE TYPE CODE 1, VEHICLE TYPE CODE 2, …
-	•	CONTRIBUTING FACTOR VEHICLE 1, CONTRIBUTING FACTOR VEHICLE 2, …
-
-To keep the dashboard fast:
-	•	We limit the integrated dataset to 10,000 rows (e.g., first 10k rows after cleaning).
-
-Getting Started:
-
-1. Prerequisites
-	•	Node.js v18+ or v20+
-	•	npm
-
-2. Clone the Repository
-
-3. Backend Setup
-
-cd backend
-npm install
-
-4. Then build the frontend and install the dependencies:
-
-cd frontend
-npm install
-npm run build
-
-5. Run the server:
-
-cd backend
-node index.js
-
-
-Using the Search Bar
-
-The search bar lives above the filter toolbar on the Analytics page.
-It parses your text and maps it to filters based on:
-	•	Borough
-	•	Year
-	•	Vehicle Type
-	•	Contributing Factor
-	•	Injury Type
-
-What it understands
-
-Boroughs
-Recognized (case-insensitive):
-	•	brooklyn
-	•	queens
-	•	manhattan
-	•	bronx
-	•	staten island
-
-Years
-4-digit years present in the dataset, e.g.:
-	•	2016
-	•	2019
-	•	2020
-
-Vehicle type keywords
-Matched by substrings like sedan, taxi, bike, etc.
-
-Examples from our data:
-	•	sedan
-	•	station wagon
-	•	suv (covers “Station Wagon/Sport Utility Vehicle”)
-	•	taxi
-	•	bike, bicyclist
-	•	bus
-	•	van
-	•	truck (e.g., box truck, dump truck, tractor truck, concrete mixer)
-	•	minibike
-	•	limo
-
-Contributing factor keywords
-Examples that map to the factor filter (underlying columns like CONTRIBUTING FACTOR VEHICLE 1):
-	•	Failure to Yield Right-of-Way
-	•	Driver Inattention/Distraction
-	•	Unsafe Lane Changing
-	•	Following Too Closely
-	•	Traffic Control Disregarded
-	•	Passing or Lane Usage Improper
-	•	Passing Too Closely
-	•	Alcohol Involvement
-	•	Other Vehicular
-	•	Reaction to Uninvolved Vehicle
-	•	Backing Unsafely
-	•	Unsafe Speed
-	•	Unspecified (less informative, but valid)
-
-Injury / bodily injury keywords
-From PERSON_INJURY and BODILY_INJURY:
-	•	INJURED
-	•	UNSPECIFIED
-	•	Body/condition terms like:
-	•	Head
-	•	Back
-	•	Chest
-	•	Shoulder
-	•	Knee
-	•	Minor Bleeding
-	•	Internal
-	•	Complaint of Pain or Nausea
-	•	None Visible
-
-⸻
-
-Example queries you can type
-
-All of these should give meaningful data with the current parser:
+The dashboard focuses on **Exploratory Data Analysis (EDA)**:  
+- When and where crashes occur  
+- Which vehicle types are involved  
+- How contributing factors vary  
+- How injuries are distributed
 
 Borough + year
 	•	brooklyn 2019 crashes
@@ -188,29 +31,82 @@ Borough + year + factor
 	•	queens 2019 failure to yield
 	•	manhattan 2019 alcohol involvement
 
-Vehicle type + factor
-	•	taxi driver inattention
-	•	bike passing or lane usage improper
-	•	suv following too closely
-	•	bus backing unsafely
+Research Questions
 
-Injury-focused
-	•	head injuries brooklyn 2019
-	•	back injuries queens 2019
-	•	minor bleeding manhattan
-	•	complaint of pain or nausea brooklyn
-	•	internal injuries 2019
+This dashboard is designed to support a variety of data-driven research questions, such as:
+	1.	Which borough has the highest crash rate per capital?
+	2.	How do total crash counts change over time (year-over-year and month-by-month)?
+	3.	Which borough experiences the highest number of severe or injury-related crashes?
+	4.	Which vehicle types (e.g., taxi, SUV, bike) are most frequently involved in collisions?
+	5.	What are the most common contributing factors for crashes in each borough?
+	6.	At what hours of the day do crashes peak, and does this pattern differ by borough?
+	7.	Are certain vehicle types more likely to be involved in crashes during nighttime hours?
+	8.	Which contributing factors are most associated with crashes resulting in bodily injuries (vs. property damage only)?
+	9.	Which injury types (e.g., head injuries, internal injuries) appear most frequently across different boroughs or vehicle types?
+	10.	Are there noticeable temporal shifts (e.g., before/after a given year) in specific contributing factors such as driver inattention or failure to yield?
 
-Mode + borough + year
-	•	pedestrian injured brooklyn 2019
-	•	bicyclist injured queens 2019
-	•	bike injured manhattan 2019
+> **Note**  
+> The original datasets are very large. We limit the integrated dataset to **10,000 rows** to keep backend loading and frontend rendering fast and stable.
 
-The search bar converts these into structured filters and then triggers the same analytics calls as the manual filter toolbar.
+---
 
-👥 Team & Contributions
-	•	Ali Ahmed – Website implementation (backend & integration)
-	•	Ali Mohab – Website implementation (frontend & integration)
-	•	Eiad Hamdy – Persons and Craches datasets initial Data cleaning and EDA.
-	•	Marwan Samir – Data cleaning, handling missing values and inconsistent formats and handling outliers.
-	•	Loay Waleed – Post Integration and joining the 2 datasets and preforming Post Integration Data cleaning, EDA creating the integrated CSV used by the dashboard.
+## 📑 Table of Contents
+
+- [Overview](#overview)
+- [Deployment Overview](#deployment-overview)
+- [Tech Stack](#tech-stack)
+- [Main Features](#main-features)
+- [Dataset & Data Processing](#dataset--data-processing)
+- [Getting Started](#getting-started)
+- [Using the Search Bar](#using-the-search-bar)
+- [What the Search Bar Understands](#what-the-search-bar-understands)
+- [Example Queries](#example-queries)
+- [Team & Contributions](#team--contributions)
+
+---
+
+## Overview
+
+The **NYC Collisions Analytics Dashboard** visualizes multiple aspects of motor vehicle collisions in New York City:
+
+- Temporal patterns (hour of day, month, year)
+- Injury distributions and severities
+- Vehicle type involvement
+- Contributing factors to collisions
+- Spatial behavior via latitude-based scatter plots
+
+The backend exposes clean `/api/eda/*` endpoints that return **Plotly-compatible JSON**, while the frontend renders interactive charts and provides an intelligent search and filtering experience.
+
+---
+
+## Deployment Overview
+
+The project is deployed on **AWS EC2** with a production-style setup.
+
+### 🖥️ Infrastructure
+
+- **OS:** Amazon Linux 2023  
+- **Region:** `eu-north-1a` (Stockholm) — chosen for stability after recent incidents in `us-east`  
+- **Instance Type:** `t3.micro` (frontend build done locally to avoid heavy build on the instance)
+
+### 🔧 Backend
+
+- Runs on **Node.js + Express**
+- Managed using **PM2** for process management
+- Integrated dataset file (`Integrated.csv`) is:
+  - Uploaded to an **S3 bucket**
+  - Copied from S3 to the EC2 instance to reduce latency and avoid downloading a huge file at runtime
+
+### 🌐 Frontend
+
+Because `t3.micro` is small for local builds on the instance, the frontend is built **locally** and then deployed to the server:
+
+```bash
+# From local machine – build frontend
+cd frontend
+npm install
+npm run build
+
+# Copy built assets to EC2 via SCP
+scp -i ../collisions.pem -r dist \
+  ec2-user@ec2-16-170-67-112.eu-north-1.compute.amazonaws.com:/home/ec2-user/NYC-Collisions/frontend/dist
