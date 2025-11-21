@@ -12,6 +12,34 @@ const {
 const notNull = (v) => v !== null && v !== undefined && v !== '';
 const toNumber = (v) => (Number.isFinite(v) ? v : null);
 
+function parseHourFromCrashTime(rawTime) {
+  if (!rawTime) return null;
+
+  const s = String(rawTime).trim();
+
+  // Expect formats like "9:43", "09:43", "23:59"
+  const m = /^(\d{1,2}):(\d{2})/.exec(s);
+  if (!m) return null;
+
+  const hour = Number(m[1]);
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
+
+  return hour;
+}
+
+function deriveHourFromRecord(r) {
+  // Try CRASH TIME variants (depending on your CSV)
+  const rawTime =
+    r['CRASH TIME'] ||
+    r['crash_time'] ||
+    r['CRASH_TIME'] ||
+    r['Crash Time'] ||
+    r.time ||
+    r['TIME'];
+
+  return parseHourFromCrashTime(rawTime);
+}
+
 const parseFilters = (raw) => {
   if (!raw) return [];
   try {
@@ -272,9 +300,18 @@ async function boxSummary(req, res) {
 
   for (const r of src) {
     if (!recordMatchesFilters(r, filters)) continue;
+
     const g = (r[by] ?? 'Unknown').toString().trim() || 'Unknown';
-    const v = toNumber(Number(r[col]));
+
+    let v;
+    if (col === 'hour') {
+      v = deriveHourFromRecord(r);
+    } else {
+      v = toNumber(Number(r[col]));
+    }
+
     if (!notNull(v)) continue;
+
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(v);
   }
@@ -285,14 +322,13 @@ async function boxSummary(req, res) {
     .filter((s) => s.y.length > 0)
     .sort((a, b) => b.y.length - a.y.length);
 
-  // optional descriptive stats if a component expects them
   const describe = (arr) => {
     const a = [...arr].sort((p, q) => p - q);
     const n = a.length;
-    const q = (p) => a[Math.floor((p/100) * (n - 1))];
-    return { n, min: a[0], q1: q(25), median: q(50), q3: q(75), max: a[n-1] };
-    };
-  const stats = series.map(s => ({ name: s.name, ...describe(s.y) }));
+    const q = (p) => a[Math.floor((p / 100) * (n - 1))];
+    return { n, min: a[0], q1: q(25), median: q(50), q3: q(75), max: a[n - 1] };
+  };
+  const stats = series.map((s) => ({ name: s.name, ...describe(s.y) }));
 
   res.json({ series, groups: stats });
 }
@@ -312,9 +348,19 @@ async function histogram(req, res) {
 
   const src = from === 'crashes' ? crashes : persons;
   const values = [];
+
   for (const r of src) {
     if (!recordMatchesFilters(r, filters)) continue;
-    const v = Number(r[col]);
+
+    let v;
+
+    if (col === 'hour') {
+      // get hour from CRASH TIME like "9:43"
+      v = deriveHourFromRecord(r);
+    } else {
+      v = Number(r[col]);
+    }
+
     if (Number.isFinite(v)) values.push(v);
   }
 

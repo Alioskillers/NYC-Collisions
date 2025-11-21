@@ -251,8 +251,8 @@ export default function Analytics() {
 
       const calls = await Promise.allSettled([
         withOpts("/api/eda/scatter?x=latitude&y=hour&limit=3000"),
-        withOpts("/api/eda/box?col=hour&by=bodily_injury"),
-        withOpts("/api/eda/hist?col=hour&bins=24&from=persons"),
+        withOpts("/api/eda/box?col=hour&by=bodily_injury&from=integrated"),
+        withOpts("/api/eda/hist?col=hour&bins=24&from=integrated"),
         withOpts("/api/eda/bar?cat=bodily_injury&top=12"),
         withOpts("/api/eda/line?date_col=crash_date&freq=M"),
         withOpts("/api/eda/corr?cols=latitude,hour"),
@@ -653,8 +653,8 @@ export default function Analytics() {
 
       {figs.box && (
         <PlotCard
-          title="Box plot by bodily_injury"
-          subtitle="Y: hour grouped by bodily_injury"
+          title="Box plot by body_injuries"
+          subtitle="Y: hour grouped by bodily injuries"
           data={figs.box.data}
           layout={figs.box.layout}
         />
@@ -663,7 +663,7 @@ export default function Analytics() {
       {figs.hist && (
         <PlotCard
           title="Histogram: hour distribution"
-          subtitle="Distribution of hour (persons)"
+          subtitle="Distribution of hour persons"
           data={figs.hist.data}
           layout={figs.hist.layout}
         />
@@ -671,7 +671,7 @@ export default function Analytics() {
 
       {figs.bar && (
         <PlotCard
-          title="Bar chart: bodily_injury (Top 12)"
+          title="Bar chart: Top 12 bodily injuries"
           subtitle="X: category, Y: count"
           data={figs.bar.data}
           layout={figs.bar.layout}
@@ -698,7 +698,7 @@ export default function Analytics() {
 
       {figs.pie && (
         <PlotCard
-          title="Pie: bodily_injury share (Top 8)"
+          title="Pie: Top 8 body injuries"
           data={figs.pie.data}
           layout={figs.pie.layout}
         />
