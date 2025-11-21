@@ -6,6 +6,16 @@ The app focuses on exploratory data analysis (EDA): understanding when and where
 
 ⸻
 
+Deployment Overview:
+
+We have deployed our website on AWS EC2 through PM2 for backend to be running and NGINX for frontend reverse proxy, Using Amazon Linux 2023 as an OS and github to clone and pull changes from the repository, we used the region EU-North-1a (stockolm) because its the most stable region after the recent incident od US-East, for building the frontend the EC2 instance type is t3.micro so building the frontend will be too heavy so we built the app locally and sent the dist folder 
+
+through scp command: 
+scp -i ../collisions.pem -r dist ec2-user@ec2-16-170-67-112.eu-north-1.compute.amazonaws.com:/home/ec2-user/NYC-Collisions/frontend/dist,
+
+For acceesing the instance we used SSH client by genrating a private access key called collisions.pem using RSA cryptographic secure algrithom.
+please visit the link to access the website: http://16.170.67.112/
+
 Tech Stack
 	•	Frontend: React + Vite + Material UI + Plotly
 	•	Backend: Node.js + Express
@@ -193,12 +203,6 @@ Mode + borough + year
 	•	bike injured manhattan 2019
 
 The search bar converts these into structured filters and then triggers the same analytics calls as the manual filter toolbar.
-
-
-🌐 Deployment Overview:
-
-We have deployed our website on vercel please visit the link to access the website: 
-
 
 👥 Team & Contributions
 	•	Ali Ahmed – Website implementation (backend & integration)
